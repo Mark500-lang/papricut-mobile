@@ -1,0 +1,149 @@
+<ion-header>
+  <ion-toolbar color="primary">
+    <ion-buttons slot="start">
+        <ion-back-button mode="md" color="light"></ion-back-button>
+    </ion-buttons>
+    <ion-title>Book a Videographer</ion-title>
+  </ion-toolbar>
+  <!-- <ion-toolbar>
+    <div class="step-progress">
+      <div class="step-indicator" [ngClass]="{ 'active': currentStep === 1 }" (click)="openTab(1)"><span class="step-indicator-text">1</span></div>
+      <div class="step-line"></div>
+      <div class="step-indicator" [ngClass]="{ 'active': currentStep === 2 }" (click)="openTab(2)"><span class="step-indicator-text">2</span></div>
+    </div>
+  </ion-toolbar> -->
+</ion-header>
+
+<ion-content class="ion-padding">
+
+<ion-spinner class="custom-spinner-center" *ngIf="apiLoader"></ion-spinner>
+
+<!-- <p><strong>Book a videographer anywhere in the world</strong></p> -->
+
+<!-- <ion-row>
+    <ion-label>Phone Number:</ion-label>
+    <ion-input type="tel" [(ngModel)]="PostData.phone_number" (ionInput)="parsePhoneNumber()">
+      <div slot="label">
+        <ion-select [(ngModel)]="countryCode" interface="popover"
+        [interfaceOptions]="{cssClass: 'country-codes'}">
+          <ion-select-option *ngFor="let phoneNumber of phoneNumbers" [value]="phoneNumber.country">
+            {{phoneNumber.text}}
+          </ion-select-option>
+        </ion-select>
+      </div>
+    </ion-input>
+  </ion-row> -->
+
+
+<div *ngIf="currentStep === 1">
+  <p class="page-label">Select the button for all items that you need:</p>
+  <ion-row *ngFor="let option of services">
+    <ion-col size="1" no-padding>
+      <ion-checkbox [(ngModel)]="option.selected" (ionChange)="updateCrewCoreServiceSelection(option)"></ion-checkbox>
+    </ion-col>
+    <ion-col size="11" no-padding>
+      {{ option.label }}
+    </ion-col>
+  </ion-row>
+
+    <ion-item>
+      <ion-label position="floating">Date*</ion-label>
+<ion-input
+id="start_date"
+value="{{ PostData.start_date | date: 'dd MMM yyyy' }}"
+[(ngModel)]="PostData.start_date"
+displayFormat="DD MMM YYYY"
+[disabled]="hasClick">
+</ion-input>
+</ion-item>
+
+<ion-popover trigger="start_date" (ionPopoverDidDismiss)="popoverDismissed()">
+<ng-template>
+  <ion-datetime
+  presentation="date"
+  [(ngModel)]="PostData.start_date"
+  displayFormat="DD MMM YYYY"
+  locale="en-US"
+  [min]="minDate"
+  (ionChange)="handlestart_dateChange($event)">
+</ion-datetime>
+</ng-template>
+</ion-popover>
+
+<ion-row>
+    <ion-col size="6">
+      <ion-item>
+        <ion-label position="floating">Country*</ion-label>
+      <ion-select [(ngModel)]="PostData.country" name="country" (ionChange)="countryEvent($event)" class="myCustomSelect" interface="action-sheet" [disabled]="hasClick">
+        <ion-select-option *ngFor="let country of countries" value="{{country.id}}">{{country.name}}</ion-select-option>
+      </ion-select>
+      </ion-item>
+      </ion-col>
+    <ion-col size="6">
+      <ion-item>
+        <ion-label position="floating">City*</ion-label>
+        <ion-select [(ngModel)]="PostData.city" name="city" class="myCustomSelect" interface="action-sheet" [disabled]="hasClick">
+          <ion-select-option *ngFor="let city of cities" value="{{city.id}}">{{city.name}}</ion-select-option>
+        </ion-select>
+        </ion-item>
+    </ion-col>
+    </ion-row>
+    <ion-item>
+      <ion-label position="floating">Tell us more about your project</ion-label>
+    <ion-textarea
+      (input)="adjustTextarea($event)"
+      class="auto-resize-textarea"
+      rows="4"
+      name="details"
+      [(ngModel)]="PostData.details"
+      [disabled]="hasClick">
+    </ion-textarea>
+    </ion-item>
+</div>
+
+<div *ngIf="currentStep === 2">
+  <p class="page-label">Personal details</p>
+  <ion-item>
+    <ion-label position="floating">Full Name*</ion-label>
+      <ion-input class="mt-2" [(ngModel)]="PostData.first_name" name="first_name" [disabled]="hasClick"></ion-input>
+      </ion-item>
+  <ion-item>
+    <ion-label position="floating">Email Address*</ion-label>
+  <ion-input class="mt-2" type="email"  [(ngModel)]="PostData.email" name="email" [disabled]="hasClick"></ion-input>
+  </ion-item>
+  <ion-item>
+    <ion-label position="floating">Mobile Number*</ion-label>
+  <ion-input class="mt-2" type="tel"  [(ngModel)]="PostData.phone_number" name="phone_number" [disabled]="hasClick"></ion-input>
+  </ion-item>
+  <ion-item>
+    <ion-label position="floating">Your Company</ion-label>
+  <ion-input class="mt-2" [(ngModel)]="PostData.company" name="company" [disabled]="hasClick"></ion-input>
+  </ion-item>
+</div>
+
+</ion-content>
+<ion-footer>
+  <ion-row>
+        <ion-col size="4" no-padding>
+          <ion-button color="primary" expand="block" size="medium" fill="outline" (click)="goToPreviousStep()">
+            <ion-icon name="chevron-back"></ion-icon> Previous
+          </ion-button>
+        </ion-col>
+        <ion-col size="5" no-padding *ngIf="currentStep < 2">
+
+        </ion-col>
+        <ion-col size="3" no-padding *ngIf="currentStep < 2">
+          <ion-button color="primary" expand="block" size="medium" fill="outline" (click)="goToNextStep()">
+            Next <ion-icon name="chevron-forward" class="icon-item"></ion-icon>
+          </ion-button>
+        </ion-col>
+        <ion-col size="8" no-padding *ngIf="currentStep === 2">
+          <ion-button color="primary" expand="block" size="medium" (click)="ActionSubmit()" *ngIf="!hasClick">
+            Submit <ion-icon name="chevron-forward" class="icon-item"></ion-icon>
+          </ion-button>
+          <ion-button mode="ios" expand="block" color="primary" size="medium" type="button" *ngIf="hasClick">
+            <ion-spinner name="crescent"></ion-spinner>
+          </ion-button>
+        </ion-col>
+      </ion-row>
+</ion-footer>
