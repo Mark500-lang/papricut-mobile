@@ -57,61 +57,48 @@ export class SigninPage {
 
 
   async ActionLogin() {
-    if (this.itemForm.valid) {
+  if (this.itemForm.valid) {
+    this.hasClick = true;
 
-      //await this.presentLoading(); // Show loader before API call
-      this.hasClick = true;
+    const email = this.itemForm.value.email;
+    const password = this.itemForm.value.password;
 
-      const email = this.itemForm.value.email;
-      const password = this.itemForm.value.password;
+    try {
+      const response: any = await this.apiService.login(email, password);
+      this.hasClick = false;
+      console.log('Login successful:', JSON.stringify(response.result));
 
-      // Call your API service method here, passing email
-      from(this.apiService.login(email,password)).subscribe(
-        (response: any) => {
-          // Handle successful login response
-          //this.loadingController.dismiss();
-          this.hasClick = false;
-          console.log('Login successful:', JSON.stringify(response.result));
+      if (response.code === 1) {
+        localStorage.setItem("Papricutcustomeremail", response.result.email);
+        // localStorage.setItem("PapricutAccessToken", response.message);
+        localStorage.setItem("PapricutRightsGroup", response.result.rights_group);
+        localStorage.setItem("Papricutcustomerfirstname", response.result.first_name);
+        localStorage.setItem("Papricutcustomerlastname", response.result.last_name);
+        localStorage.setItem("PapricutcustomermobileNo", response.result.phone_number);
+        localStorage.setItem("PapricutisSuper", response.result.isSuper);
 
-          if(response.code == 1) {
-            localStorage.setItem("Papricutcustomeremail",response.result.email);
+        await this.authService.setAuthToken(response.message); 
+        await this.authService.setAuthenticated();             
 
-            localStorage.setItem("PapricutAccessToken",response.message);
-
-
-            //console.log('accessToken--'+localStorage.getItem("PapricutAccessToken"));
-
-            localStorage.setItem("PapricutRightsGroup",response.result.rights_group);
-            localStorage.setItem("Papricutcustomerfirstname",response.result.first_name);
-            localStorage.setItem("Papricutcustomerlastname",response.result.last_name);
-            localStorage.setItem("PapricutcustomermobileNo",response.result.phone_number);
-            localStorage.setItem("PapricutisSuper",response.result.isSuper);
-            //localStorage.setItem("Papricutcustomeremail",response.result.email);
-
-            this.authService.setAuthenticated();
-            this.itemForm.reset();
-            this.router.navigate(['/home']);
-          }
-          else if(response.code == 1) {
-            this.presentAlertSignUp(response.message);
-          }
-          else {
-            this.presentAlert("","",response.message);
-          }
-
-        },
-        (error: any) => {
-          // Handle login error
-          this.hasClick = false;
-          //this.loadingController.dismiss();
-          //console.error('Login error:', error);
-        }
-      );
+        this.itemForm.reset();
+        await this.router.navigate(['/home']);                 
+      } 
+      else if (response.code === 2) {                          
+        this.presentAlertSignUp(response.message);
+      } 
+      else {
+        this.presentAlert("", "", response.message);
+      }
+    } catch (error) {
+      this.hasClick = false;
+      console.error('Login error:', error);
+      this.presentAlert("Login Failed", "", "An error occurred. Please try again.");
     }
-    else {
-      this.presentAlert("","","Please provide valid details");
-    }
+  } else {
+    this.presentAlert("", "", "Please provide valid details");
   }
+}
+
 
   async presentAlertSignUp(message:any) {
     let alert = await this.alertCtrl.create({

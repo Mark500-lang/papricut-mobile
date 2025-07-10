@@ -303,8 +303,8 @@ export class RegisterPage implements OnInit {
     }
 
   openSignin() {
-    //this.router.navigate(['/signin']);
-    this.apiService.openLink('https://papricut.com/login');
+    this.router.navigate(['/signin']);
+    // this.apiService.openLink('https://papricut.com/login');
   }
 
   terms() {

@@ -6,7 +6,7 @@ import { Platform } from '@ionic/angular';
 import { Plugins } from '@capacitor/core'; // Import Plugins from Capacitor core
 const { App } = Plugins; // Destructure the App plugin from Plugins
 
-import { InAppBrowser } from '@awesome-cordova-plugins/in-app-browser/ngx';
+import { Browser } from '@capacitor/browser';
 
 @Component({
   selector: 'app-welcome',
@@ -28,7 +28,6 @@ export class WelcomePage implements OnInit {
     public otherService: OtherService,
     private navCrtl: NavController,
     private apiService: ApiService,
-    private iab: InAppBrowser
   ) {
     this.otherService.statusBar("#d1378c", 1);
   }
@@ -88,9 +87,13 @@ async PresentAlertCheck(data: any) {
   });
   await alert.present();
 
-  if (data.force == true) {
-    alert.onDidDismiss().then(() => {
-      this.iab.create(data.url, '_system');
+  if (data.force === true) {
+    alert.onDidDismiss().then(async () => {
+      try {
+        await Browser.open({ url: data.url });
+      } catch (error) {
+        console.error('Error opening browser:', error);
+      }
     });
   }
 }

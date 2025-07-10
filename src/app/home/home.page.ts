@@ -52,30 +52,25 @@ export class HomePage implements OnInit {
   }
 
   getDashboardData() {
-    if(navigator.onLine !== true) {
-      this.presentAlert('','No Internet Connection!',"Please put Internet Connection ON and try again");
-    }
-    else {
-      //this.apiLoader = true;
-      this.apiService.getDashboard()
-      .then(result => {
-       this.data = result;
-       //this.apiLoader = false;
+  if(navigator.onLine !== true) {
+    this.presentAlert('', 'No Internet Connection!', "Please put Internet Connection ON and try again");
+  } else {
+    this.apiService.getDashboard().then(result => {
+      this.data = result;
 
-       if(this.data.code == 400 || this.data.code == 0) {
-             this.logoutNow();
-       }
+      if(this.data.code == 400 || this.data.code == 0) {
+        this.logoutNow();
+        return;
+      }
 
-       //console.log('getDashboard---'+JSON.stringify(this.data));
-       this.delivered = this.data.result.delivered;
-       this.ongoing = this.data.result.ongoing;
-       this.completed = this.data.result.completed;
-       this.rights_group = this.data.result.rights_group;
-       this.isSuper = this.data.result.isSuper;
-
-      });
-    }
+      this.delivered = this.data.result.delivered;
+      this.ongoing = this.data.result.ongoing;
+      this.completed = this.data.result.completed;
+      this.rights_group = this.data.result.rights_group;
+      this.isSuper = this.data.result.isSuper;
+    });
   }
+}
 
   logoutNow() {
     this.authService.clearAuthentication();

@@ -4,22 +4,22 @@ const config: CapacitorConfig = {
   appId: 'papricut.app.mobile',
   appName: 'Papricut',
   webDir: 'www',
-  bundledWebRuntime: false,
+  // bundledWebRuntime: false,
   ios: {
-    icon: 'resources/ios/icon/ios_icon.png',  // Update if necessary
+    // You can leave this block empty or include valid Capacitor iOS options here
   },
   server: {
-    androidScheme: 'https'
+    androidScheme: 'https',
   },
   plugins: {
-	SplashScreen: {
-    backgroundColor: "#d3378d",
-    splashFullScreen: true,
-    splashImmersive: true,
-		launchAutoHide: false,
-		androidSplashResourceName: 'custom_splash',
-	},
-},
+    SplashScreen: {
+      backgroundColor: '#d1388b',
+      splashFullScreen: true,
+      splashImmersive: true,
+      launchAutoHide: false,
+      androidSplashResourceName: 'custom_splash',
+    },
+  },
 };
 
 export default config;

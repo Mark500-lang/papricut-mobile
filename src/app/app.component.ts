@@ -1,4 +1,4 @@
-import { Component } from '@angular/core';
+import { Component, OnInit } from '@angular/core';
 import { Router } from '@angular/router';
 import {
   NavController,
@@ -7,72 +7,63 @@ import {
   AlertController,
   ActionSheetController,
 } from '@ionic/angular';
-import { SplashScreen } from '@awesome-cordova-plugins/splash-screen/ngx';
+import { SplashScreen } from '@capacitor/splash-screen';
 import { StatusBar } from '@capacitor/status-bar';
+import { App as CapacitorApp } from '@capacitor/app';
+// import { PushNotifications } from '@capacitor/push-notifications'; // DISABLED for now
+
 import { ApiService } from './services/api.service';
 import { NetworkService } from './services/network.service';
 import { AuthService } from './services/auth.service';
 import { Storage } from '@ionic/storage';
 import { environment } from 'src/environments/environment';
-import { Location } from '@angular/common';
-import { App as CapacitorApp } from '@capacitor/app';
-import { PushNotifications, Token, PushNotification, PushNotificationActionPerformed } from '@capacitor/push-notifications'; 
+
 @Component({
   selector: 'app-root',
   templateUrl: 'app.component.html',
   styleUrls: ['app.component.scss'],
 })
-export class AppComponent {
+export class AppComponent implements OnInit {
   currentVersion = environment.currentVersion;
-
-  isActionSheetOpen: boolean = false;
-
-  first_name: any;
-  last_name: any;
-  image_url: any;
-
-  data: any; // ✅ FIX for all the `this.data` errors
+  isActionSheetOpen = false;
+  data: any;
 
   constructor(
     public storage: Storage,
     private platform: Platform,
-    private splashScreen: SplashScreen,
     private router: Router,
     private alertCtrl: AlertController,
     private toastController: ToastController,
     private navCtrl: NavController,
     private actionSheetCtrl: ActionSheetController,
-    private location: Location,
     private apiService: ApiService,
     private networkService: NetworkService,
     private authService: AuthService
-  ) {
-    this.initStorage();
-    this.initializeApp();
-  }
+  ) {}
 
-  initializeApp() {
-    this.platform.ready().then(() => {
-      StatusBar.setBackgroundColor({ color: '#d1378c' });
-      StatusBar.setOverlaysWebView({ overlay: true });
+  async ngOnInit() {
+    try {
+      await this.initStorage();
+      await this.authService.initializeAuth();
 
-      this.splashScreen.hide();
-      this.checkCanGoBack();
+      this.platform.ready().then(async () => {
+        await StatusBar.setBackgroundColor({ color: '#d1378c' });
+        await StatusBar.setOverlaysWebView({ overlay: true });
 
-      if (this.platform.is('cordova')) {
-        this.initPushNotification(); // ✅ ENABLE push logic
-      }
+        await SplashScreen.hide();
+        this.checkCanGoBack();
 
-      if (this.authService.isAuthenticated()) {
-        console.log('isAuthenticated getDashboard');
-        this.router.navigate(['/home']);
-      } else {
-        console.log('isAuthenticated welcome');
-        this.router.navigate(['/welcome']);
-      }
+        // 👇 Safely skip push notification setup
+        this.safeInitPushNotification();
 
-      this.checkForUpdate();
-    });
+        const isAuth = await this.authService.getIsAuthenticatedValue();
+        this.router.navigate([isAuth ? '/home' : '/welcome']);
+
+        this.checkForUpdate();
+      });
+    } catch (error) {
+      console.error('Error during app initialization:', error);
+    }
   }
 
   async initStorage() {
@@ -80,17 +71,13 @@ export class AppComponent {
   }
 
   checkCanGoBack() {
-    this.platform.backButton.subscribeWithPriority(10, () => {
-      if (this.isActionSheetOpen) return;
-
-      CapacitorApp.addListener('backButton', ({ canGoBack }) => {
-        if (!canGoBack) {
-          this.isActionSheetOpen = true;
-          this.presentBackActionSheet();
-        } else {
-          window.history.back();
-        }
-      });
+    CapacitorApp.addListener('backButton', ({ canGoBack }) => {
+      if (!canGoBack) {
+        this.isActionSheetOpen = true;
+        this.presentBackActionSheet();
+      } else {
+        window.history.back();
+      }
     });
   }
 
@@ -101,7 +88,6 @@ export class AppComponent {
         {
           text: 'Yes',
           handler: () => {
-            console.log('User clicked Yes');
             this.isActionSheetOpen = false;
             this.exitApp();
           },
@@ -110,7 +96,6 @@ export class AppComponent {
           text: 'Cancel',
           role: 'cancel',
           handler: () => {
-            console.log('User clicked Cancel');
             this.isActionSheetOpen = false;
           },
         },
@@ -125,19 +110,16 @@ export class AppComponent {
   }
 
   async logout() {
-    let alert = await this.alertCtrl.create({
+    const alert = await this.alertCtrl.create({
       header: 'Confirm',
       message: 'Do you want to logout from the App?',
       buttons: [
-        {
-          text: 'Cancel',
-          role: 'cancel',
-        },
+        { text: 'Cancel', role: 'cancel' },
         {
           text: 'Yes',
           handler: () => {
-            console.log('User clicked Yes');
-            // this.logoutNow(); // implement this if needed
+            this.authService.clearAuthentication();
+            this.router.navigate(['/welcome']);
           },
         },
       ],
@@ -145,46 +127,18 @@ export class AppComponent {
     await alert.present();
   }
 
-  // ✅ Push Notification Logic
-initPushNotification() {
-  PushNotifications.requestPermissions().then(result => {
-    if (result.receive === 'granted') {
-      // Register with Apple / Google to receive push
-      PushNotifications.register();
-    } else {
-      this.toast('Push Notification permission denied.');
-    }
-  });
+  /**
+   * This method is stubbed to prevent crashing due to missing Firebase config.
+   * Replace with OneSignal or actual push logic once ready.
+   */
+  safeInitPushNotification() {
+    console.warn(
+      '[Push] PushNotifications skipped. Firebase not configured (no google-services.json).'
+    );
 
-  // On successful registration, send the token to the server
-  PushNotifications.addListener('registration', (token: Token) => {
-    console.log('Push registration success, token: ', token.value);
-    this.SendTokenToServer(token.value);
-  });
+    // ❗ You can conditionally integrate OneSignal or Pushy SDK here later
+  }
 
-  // On registration error
-  PushNotifications.addListener('registrationError', (error: any) => {
-    console.error('Error on registration: ', JSON.stringify(error));
-    this.toast('Push registration error.');
-  });
-
-  // On receiving push notification while app is in foreground
-  PushNotifications.addListener('pushNotificationReceived', (notification: PushNotification) => {
-    console.log('Push received: ', notification);
-    this.presentAlertForeGround({
-      title: notification.title,
-      body: notification.body
-    });
-  });
-
-  // When the user taps on a notification
-  PushNotifications.addListener('pushNotificationActionPerformed', (action: PushNotificationActionPerformed) => {
-    console.log('Notification action performed', action.notification);
-    // You could navigate or trigger logic here
-  });
-}
-
-  // ✅ Moved here from previous logic
   SendTokenToServer(fcmToken: any) {
     this.apiService.SendTokenToServer(fcmToken).then(
       (result: any) => {
@@ -196,18 +150,14 @@ initPushNotification() {
     );
   }
 
-  // ✅ FIX: pass required platform argument
   checkForUpdate() {
     const platform = this.platform.is('android') ? 'android' : 'ios';
 
     this.apiService.checkVersion(platform).then(
       (result: any) => {
         this.data = result;
-
-        if ((this.data as any)?.result?.code == 1) {
-          if ('result' in this.data) {
-            this.PresentAlertCheck(this.data?.result);
-          }
+        if (this.data?.result?.code == 1) {
+          this.PresentAlertCheck(this.data.result);
         }
       },
       (err: any) => {
@@ -232,13 +182,13 @@ initPushNotification() {
   }
 
   async presentAlertForeGround(data: any) {
-  const alert = await this.alertCtrl.create({
-    header: data.title || 'Notification',
-    message: data.body || 'You have a new message.',
-    buttons: ['Ok'],
-  });
-  await alert.present();
-}
+    const alert = await this.alertCtrl.create({
+      header: data.title || 'Notification',
+      message: data.body || 'You have a new message.',
+      buttons: ['Ok'],
+    });
+    await alert.present();
+  }
 
   async toast(txt: any) {
     const toast = await this.toastController.create({
@@ -252,7 +202,7 @@ initPushNotification() {
     toast.present();
   }
 
-  // Placeholders (optional to implement)
+  // Empty methods for future features
   shareApp() {}
   settings() {}
   myaccount() {}
