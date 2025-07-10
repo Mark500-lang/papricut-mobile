@@ -1,0 +1,54 @@
+workflows:
+  ios-distribute:
+    name: iOS Distribute Workflow
+    environment:
+      vars:
+        XCODE_PROJECT: "ios/App.xcodeproj"
+        XCODE_SCHEME: "App" 
+        BUNDLE_ID: "papricut.app.mobile"
+        APP_STORE_CONNECT_USERNAME: $APP_STORE_CONNECT_USERNAME
+      groups:
+        - app_store_credentials
+    triggering:
+      events:
+        - push
+    scripts:
+      - name: Set up keychain and code signing
+        script: |
+          echo $DISTRIBUTION_CERTIFICATE | base64 --decode > certificate.p12
+          echo $PROVISIONING_PROFILE | base64 --decode > profile.mobileprovision
+          security create-keychain -p "" build.keychain
+          security default-keychain -s build.keychain
+          security unlock-keychain -p "" build.keychain
+          security import certificate.p12 -k build.keychain -P $CERTIFICATE_PASSWORD -T /usr/bin/codesign
+          mkdir -p ~/Library/MobileDevice/Provisioning\ Profiles
+          cp profile.mobileprovision ~/Library/MobileDevice/Provisioning\ Profiles/
+      - name: Install dependencies
+        script: |
+          npm install -g @ionic/cli
+          npm ci
+      - name: Build Ionic project
+        script: |
+          ionic build --prod
+          npx cap sync ios
+      - name: Build .ipa with xcodebuild
+        script: |
+          xcodebuild -workspace ios/App.xcworkspace \
+                     -scheme $XCODE_SCHEME \
+                     -sdk iphoneos \
+                     -configuration Release \
+                     -archivePath $HOME/build/App.xcarchive \
+                     archive
+
+          xcodebuild -exportArchive \
+                     -archivePath $HOME/build/App.xcarchive \
+                     -exportOptionsPlist ExportOptions.plist \
+                     -exportPath $HOME/build/ipa
+      - name: Upload to App Store
+        script: |
+          xcrun altool --upload-app -f $HOME/build/ipa/*.ipa \
+                       -t ios \
+                       -u "$APP_STORE_CONNECT_USERNAME" \
+                       -p "$APP_SPECIFIC_PASSWORD"
+    artifacts:
+      - build/ipa/*.ipa
