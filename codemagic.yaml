@@ -16,63 +16,23 @@ workflows:
       - name: Set up keychain and code signing
         script: |
           set -e
-          echo "=== 🚀 Starting Keychain and Code Signing Setup ==="
+          echo "🔐 Setting up certificate and provisioning profile..."
 
-          # Validate env variables
-          if [ -z "$DISTRIBUTION_CERTIFICATE" ]; then
-            echo "❌ ERROR: DISTRIBUTION_CERTIFICATE is missing"
+          if [ -z "$DISTRIBUTION_CERTIFICATE" ] || [ -z "$CERTIFICATE_PASSWORD" ] || [ -z "$PROVISIONING_PROFILE" ]; then
+            echo "❌ Missing required signing credentials"
             exit 1
           fi
 
-          if [ -z "$CERTIFICATE_PASSWORD" ]; then
-            echo "❌ ERROR: CERTIFICATE_PASSWORD is missing"
-            exit 1
-          fi
+          echo "$DISTRIBUTION_CERTIFICATE" | base64 --decode > certificate.p12
+          echo "$PROVISIONING_PROFILE" | base64 --decode > profile.mobileprovision
 
-          if [ -z "$PROVISIONING_PROFILE" ]; then
-            echo "❌ ERROR: PROVISIONING_PROFILE is missing"
-            exit 1
-          fi
-
-          echo "✅ Environment variables loaded"
-
-          # Decode files
-          echo "$DISTRIBUTION_CERTIFICATE" | base64 --decode > certificate.p12 || {
-            echo "❌ Failed to decode DISTRIBUTION_CERTIFICATE"
-            exit 1
-          }
-          echo "✅ certificate.p12 decoded"
-
-          echo "$PROVISIONING_PROFILE" | base64 --decode > profile.mobileprovision || {
-            echo "❌ Failed to decode PROVISIONING_PROFILE"
-            exit 1
-          }
-          echo "✅ profile.mobileprovision decoded"
-
-          # Set up the keychain
-          echo "🔐 Creating build.keychain..."
-          security create-keychain -p "" build.keychain || echo "⚠️ Keychain exists"
-
-          echo "🔓 Unlocking keychain..."
-          security unlock-keychain -p "" build.keychain
-
-          echo "⭐ Setting default keychain..."
+          security create-keychain -p "" build.keychain
           security default-keychain -s build.keychain
+          security unlock-keychain -p "" build.keychain
+          security import certificate.p12 -k build.keychain -P "$CERTIFICATE_PASSWORD" -T /usr/bin/codesign
 
-          echo "📥 Importing certificate..."
-          security import certificate.p12 -k build.keychain -P "$CERTIFICATE_PASSWORD" -T /usr/bin/codesign || {
-            echo "❌ Failed to import certificate. Wrong password or corrupted .p12"
-            exit 1
-          }
-          echo "✅ Certificate imported"
-
-          echo "📋 Copying provisioning profile to correct location..."
           mkdir -p ~/Library/MobileDevice/Provisioning\ Profiles
           cp profile.mobileprovision ~/Library/MobileDevice/Provisioning\ Profiles/
-          echo "✅ Provisioning profile copied"
-
-          echo "🎉 Setup completed successfully"
-
 
       - name: Install dependencies
         script: |
