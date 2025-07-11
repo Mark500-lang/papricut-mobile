@@ -9,6 +9,8 @@ workflows:
         APP_STORE_CONNECT_USERNAME: $APP_STORE_CONNECT_USERNAME
       groups:
         - Papricut
+    cache:
+          cache_paths: []
     triggering:
       events:
         - push
