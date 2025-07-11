@@ -13,6 +13,14 @@ workflows:
       events:
         - push
     scripts:
+      - name: Pre-clean Xcode caches and keychain
+        script: |
+          set -e
+          echo "🧹 Cleaning Xcode DerivedData, keychains, and provisioning profiles..."
+          rm -rf ~/Library/Developer/Xcode/DerivedData/*
+          rm -rf ~/Library/MobileDevice/Provisioning\ Profiles/*
+          security delete-keychain build.keychain || true
+
       - name: Set up keychain and code signing
         script: |
           set -e
@@ -29,7 +37,12 @@ workflows:
           security create-keychain -p "" build.keychain
           security default-keychain -s build.keychain
           security unlock-keychain -p "" build.keychain
-          security import certificate.p12 -k build.keychain -P "$CERTIFICATE_PASSWORD" -T /usr/bin/codesign
+
+          echo "📥 Importing .p12..."
+          if ! security import certificate.p12 -k build.keychain -P "$CERTIFICATE_PASSWORD" -T /usr/bin/codesign; then
+            echo "❌ Failed to import certificate. Check that the password is correct and the .p12 is valid"
+            exit 1
+          fi
 
           mkdir -p ~/Library/MobileDevice/Provisioning\ Profiles
           cp profile.mobileprovision ~/Library/MobileDevice/Provisioning\ Profiles/
