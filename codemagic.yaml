@@ -41,6 +41,7 @@ workflows:
                      -sdk iphoneos \
                      -configuration Release \
                      -archivePath $HOME/build/App.xcarchive \
+                     DEVELOPMENT_TEAM="$TEAM_ID" \
                      archive
 
           xcodebuild -exportArchive \
