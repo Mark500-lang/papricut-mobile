@@ -4,105 +4,51 @@ workflows:
     environment:
       vars:
         XCODE_PROJECT: "ios/App.xcodeproj"
-        XCODE_SCHEME: "App"
+        XCODE_SCHEME: "App" # replace with your actual scheme name
         BUNDLE_ID: "papricut.app.mobile"
         APP_STORE_CONNECT_USERNAME: $APP_STORE_CONNECT_USERNAME
       groups:
-        - Papricut
-    cache:
-          cache_paths: []
+        - app_store_credentials
     triggering:
       events:
         - push
     scripts:
-      - name: Pre-clean Xcode caches and keychain
+      - name: Set up keychain and code signing
         script: |
-          set -e
-          echo "🧹 Cleaning Xcode DerivedData, keychains, and provisioning profiles..."
-          rm -rf ~/Library/Developer/Xcode/DerivedData/*
-          rm -rf ~/Library/MobileDevice/Provisioning\ Profiles/*
-          security delete-keychain build.keychain || true
-
-      - name: 🔐 Set up certificate and provisioning profile
-        script: |
-          set -e
-          echo "🔐 Setting up certificate and provisioning profile..."
-
-          echo "$DISTRIBUTION_CERTIFICATE" | base64 --decode > certificate.p12
-          echo "$PROVISIONING_PROFILE" | base64 --decode > profile.mobileprovision
-
-          echo "📄 Verifying .p12 file..."
-          openssl pkcs12 -info -in certificate.p12 -noout -passin pass:$CERTIFICATE_PASSWORD || {
-            echo "❌ .p12 verification failed. Incorrect password or corrupted file."
-            exit 1
-          }
-
-          echo "🔐 Importing .p12 into keychain..."
+          echo $DISTRIBUTION_CERTIFICATE | base64 --decode > certificate.p12
+          echo $PROVISIONING_PROFILE | base64 --decode > profile.mobileprovision
           security create-keychain -p "" build.keychain
           security default-keychain -s build.keychain
           security unlock-keychain -p "" build.keychain
-          security import certificate.p12 -k build.keychain -P "$CERTIFICATE_PASSWORD" -T /usr/bin/codesign || {
-            echo "❌ Failed to import certificate. Check that the password is correct and the .p12 is valid"
-            exit 1
-          }
-
+          security import certificate.p12 -k build.keychain -P $CERTIFICATE_PASSWORD -T /usr/bin/codesign
           mkdir -p ~/Library/MobileDevice/Provisioning\ Profiles
           cp profile.mobileprovision ~/Library/MobileDevice/Provisioning\ Profiles/
-
       - name: Install dependencies
         script: |
-          set -e
-          echo "📦 Installing dependencies..."
           npm install -g @ionic/cli
           npm ci
-
       - name: Build Ionic project
         script: |
-          set -e
-          echo "⚙️ Building Ionic project..."
-          ionic build --prod || { echo "❌ Ionic build failed"; exit 1; }
-          npx cap sync ios || { echo "❌ Capacitor sync failed"; exit 1; }
-
+          ionic build --prod
+          npx cap sync ios
       - name: Build .ipa with xcodebuild
         script: |
-          set -e
-          echo "📱 Archiving project with xcodebuild..."
           xcodebuild -workspace ios/App.xcworkspace \
-                     -scheme "$XCODE_SCHEME" \
+                     -scheme $XCODE_SCHEME \
                      -sdk iphoneos \
                      -configuration Release \
                      -archivePath $HOME/build/App.xcarchive \
-                     archive || { echo "❌ xcodebuild archive failed"; exit 1; }
+                     archive
 
-          echo "📦 Exporting .ipa..."
           xcodebuild -exportArchive \
                      -archivePath $HOME/build/App.xcarchive \
                      -exportOptionsPlist ExportOptions.plist \
-                     -exportPath $HOME/build/ipa || { echo "❌ xcodebuild export failed"; exit 1; }
-
+                     -exportPath $HOME/build/ipa
       - name: Upload to App Store
         script: |
-          set -e
-          echo "🚀 Uploading to App Store..."
-
-          IPA_PATH=$(find $HOME/build/ipa -name "*.ipa" | head -n 1)
-          if [ ! -f "$IPA_PATH" ]; then
-            echo "❌ .ipa file not found. Upload aborted."
-            exit 1
-          fi
-
-          if [ -z "$APP_STORE_CONNECT_USERNAME" ] || [ -z "$APP_SPECIFIC_PASSWORD" ]; then
-            echo "❌ Missing App Store Connect credentials"
-            exit 1
-          fi
-
-          xcrun altool --upload-app -f "$IPA_PATH" \
+          xcrun altool --upload-app -f $HOME/build/ipa/*.ipa \
                        -t ios \
                        -u "$APP_STORE_CONNECT_USERNAME" \
-                       -p "$APP_SPECIFIC_PASSWORD" || {
-            echo "❌ Upload to App Store failed"
-            exit 1
-          }
-
+                       -p "$APP_SPECIFIC_PASSWORD"
     artifacts:
       - build/ipa/*.ipa
