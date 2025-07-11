@@ -7,6 +7,7 @@ workflows:
         XCODE_SCHEME: "App"
         BUNDLE_ID: "papricut.app.mobile"
         APP_STORE_CONNECT_USERNAME: $APP_STORE_CONNECT_USERNAME
+        PROVISIONING_PROFILE_NAME: "Papricut_AppStore_2025"
       groups:
         - Papricut
     triggering:
@@ -42,7 +43,7 @@ workflows:
                     -configuration Release \
                     -archivePath $HOME/build/App.xcarchive \
                     DEVELOPMENT_TEAM="$TEAM_ID" \
-                    PROVISIONING_PROFILE_SPECIFIER="$(PROVISIONING_PROFILE_NAME)" \
+                    PROVISIONING_PROFILE_SPECIFIER="$PROVISIONING_PROFILE_NAME"
                     archive
 
           xcodebuild -exportArchive \
