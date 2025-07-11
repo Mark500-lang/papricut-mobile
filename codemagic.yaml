@@ -17,12 +17,10 @@ workflows:
       - name: Set up keychain and code signing
         script: |
           echo $DISTRIBUTION_CERTIFICATE | base64 --decode > certificate.p12
-
           security create-keychain -p "" build.keychain
           security default-keychain -s build.keychain
           security unlock-keychain -p "" build.keychain
           security import certificate.p12 -k build.keychain -P $CERTIFICATE_PASSWORD -T /usr/bin/codesign
-
           security set-key-partition-list -S apple-tool:,apple: -s -k "" build.keychain > /dev/null
       - name: Install dependencies
         script: |
