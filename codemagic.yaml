@@ -14,34 +14,33 @@ workflows:
       events:
         - push
     scripts:
-      - name: Set up keychain and code signing
+      - name: Set up keychain and import certificate
         script: |
           echo $DISTRIBUTION_CERTIFICATE | base64 --decode > certificate.p12
-          echo $PROVISIONING_PROFILE | base64 --decode > profile.mobileprovision
 
           security create-keychain -p "" build.keychain
           security default-keychain -s build.keychain
           security unlock-keychain -p "" build.keychain
-          security import certificate.p12 -k build.keychain -P $CERTIFICATE_PASSWORD -T /usr/bin/codesign
+          security import certificate.p12 -k build.keychain -P "$CERTIFICATE_PASSWORD" -T /usr/bin/codesign
           security set-key-partition-list -S apple-tool:,apple: -s -k "" build.keychain > /dev/null
 
-          mkdir -p "$HOME/Library/MobileDevice/Provisioning Profiles"
-          UUID=$(security cms -D -i profile.mobileprovision | plutil -extract UUID xml1 -o - - | xmllint --xpath "string(//string)" -)
-          cp profile.mobileprovision "$HOME/Library/MobileDevice/Provisioning Profiles/$UUID.mobileprovision"
       - name: Install dependencies
         script: |
           npm install -g @ionic/cli
           npm ci
           npm install
+
       - name: Clean DerivedData
         script: |
           rm -rf ~/Library/Developer/Xcode/DerivedData
+
       - name: Build Ionic project
         script: |
           ionic build --prod
           npx cap sync ios
           npx cap update ios
           cd ios/App && pod install && cd ../..
+
       - name: Build .ipa with xcodebuild
         script: |
           xcodebuild -workspace "$XCODE_WORKSPACE" \
@@ -51,6 +50,7 @@ workflows:
                      -archivePath $HOME/build/App.xcarchive \
                      -destination 'generic/platform=iOS' \
                      DEVELOPMENT_TEAM="$TEAM_ID" \
+                     CODE_SIGN_IDENTITY="Apple Distribution" \
                      -allowProvisioningUpdates \
                      archive
 
@@ -58,11 +58,13 @@ workflows:
                      -archivePath $HOME/build/App.xcarchive \
                      -exportOptionsPlist ExportOptions.plist \
                      -exportPath $HOME/build/ipa
+
       - name: Upload to App Store
         script: |
           xcrun altool --upload-app -f $HOME/build/ipa/*.ipa \
                        -t ios \
                        -u "$APP_STORE_CONNECT_USERNAME" \
                        -p "$APP_SPECIFIC_PASSWORD"
+
     artifacts:
       - build/ipa/*.ipa
