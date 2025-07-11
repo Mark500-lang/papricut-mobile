@@ -125,11 +125,11 @@
 				LastSwiftUpdateCheck = 920;
 				LastUpgradeCheck = 920;
 				TargetAttributes = {
-				504EC3031FED79650016851F = {
-					CreatedOnToolsVersion = 9.2;
-					LastSwiftMigration = 1100;
-					ProvisioningStyle = Manual;
-				};
+					504EC3031FED79650016851F = {
+						CreatedOnToolsVersion = 9.2;
+						LastSwiftMigration = 1100;
+						ProvisioningStyle = Manual;
+					};
 				};
 			};
 			buildConfigurationList = 504EC2FF1FED79650016851F /* Build configuration list for PBXProject "App" */;
