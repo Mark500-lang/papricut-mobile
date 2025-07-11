@@ -26,26 +26,27 @@ workflows:
           set -e
           echo "🔐 Setting up certificate and provisioning profile..."
 
-          if [ -z "$DISTRIBUTION_CERTIFICATE" ] || [ -z "$CERTIFICATE_PASSWORD" ] || [ -z "$PROVISIONING_PROFILE" ]; then
-            echo "❌ Missing required signing credentials"
+          echo "$DISTRIBUTION_CERTIFICATE" | base64 --decode > certificate.p12 || {
+            echo "❌ Failed to decode certificate"
             exit 1
-          fi
+          }
 
-          echo "$DISTRIBUTION_CERTIFICATE" | base64 --decode > certificate.p12
-          echo "$PROVISIONING_PROFILE" | base64 --decode > profile.mobileprovision
+          echo "📄 Verifying .p12 file before import..."
+          openssl pkcs12 -info -in certificate.p12 -noout -password pass:$CERTIFICATE_PASSWORD || {
+            echo "❌ openssl pre-check failed"
+            exit 1
+          }
 
           security create-keychain -p "" build.keychain
           security default-keychain -s build.keychain
           security unlock-keychain -p "" build.keychain
 
           echo "📥 Importing .p12..."
-          if ! security import certificate.p12 -k build.keychain -P "$CERTIFICATE_PASSWORD" -T /usr/bin/codesign; then
+          security import certificate.p12 -k build.keychain -P "$CERTIFICATE_PASSWORD" -T /usr/bin/codesign || {
             echo "❌ Failed to import certificate. Check that the password is correct and the .p12 is valid"
             exit 1
-          fi
+          }
 
-          mkdir -p ~/Library/MobileDevice/Provisioning\ Profiles
-          cp profile.mobileprovision ~/Library/MobileDevice/Provisioning\ Profiles/
 
       - name: Install dependencies
         script: |
