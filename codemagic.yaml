@@ -3,15 +3,12 @@ workflows:
     name: iOS Distribute Workflow
     environment:
       vars:
-        XCODE_PROJECT: "ios/App.xcodeproj"
-        XCODE_SCHEME: "App" # replace with your actual scheme name
+        XCODE_WORKSPACE: "ios/App/App.xcworkspace
+        XCODE_SCHEME: "App"
         BUNDLE_ID: "papricut.app.mobile"
         APP_STORE_CONNECT_USERNAME: $APP_STORE_CONNECT_USERNAME
       groups:
-        - Papricut
-    triggering:
-      events:
-        - push
+        - app_store_credentials
     scripts:
       - name: Set up keychain and code signing
         script: |
@@ -27,13 +24,16 @@ workflows:
         script: |
           npm install -g @ionic/cli
           npm ci
+          npm install
       - name: Build Ionic project
         script: |
           ionic build --prod
           npx cap sync ios
+          npx cap update ios
+          cd ios/App && pod install && cd ../..
       - name: Build .ipa with xcodebuild
         script: |
-          xcodebuild -workspace ios/App.xcworkspace \
+          xcodebuild -workspace $XCODE_WORKSPACE \
                      -scheme $XCODE_SCHEME \
                      -sdk iphoneos \
                      -configuration Release \
