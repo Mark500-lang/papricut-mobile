@@ -3,12 +3,11 @@ workflows:
     name: iOS Distribute Workflow
     environment:
       vars:
-        XCODE_WORKSPACE: "ios/App/App.xcworkspace"  # ✅ Correct path and consistent indentation
+        XCODE_WORKSPACE: "ios/App/App.xcworkspace"
         XCODE_SCHEME: "App"
         BUNDLE_ID: "papricut.app.mobile"
-        APP_STORE_CONNECT_USERNAME: $APP_STORE_CONNECT_USERNAME
-        PROVISIONING_PROFILE_NAME: "Papricut_AppStore_2025"
         TEAM_ID: "H9A4H444G4"
+        APP_STORE_CONNECT_USERNAME: $APP_STORE_CONNECT_USERNAME
       groups:
         - Papricut
     triggering:
@@ -24,9 +23,9 @@ workflows:
           security default-keychain -s build.keychain
           security unlock-keychain -p "" build.keychain
           security import certificate.p12 -k build.keychain -P $CERTIFICATE_PASSWORD -T /usr/bin/codesign
+          security set-key-partition-list -S apple-tool:,apple: -s -k "" build.keychain > /dev/null
 
           mkdir -p "$HOME/Library/MobileDevice/Provisioning Profiles"
-
           UUID=$(security cms -D -i profile.mobileprovision | plutil -extract UUID xml1 -o - - | xmllint --xpath "string(//string)" -)
           cp profile.mobileprovision "$HOME/Library/MobileDevice/Provisioning Profiles/$UUID.mobileprovision"
       - name: Install dependencies
@@ -46,19 +45,19 @@ workflows:
       - name: Build .ipa with xcodebuild
         script: |
           xcodebuild -workspace "$XCODE_WORKSPACE" \
-                    -scheme "$XCODE_SCHEME" \
-                    -sdk iphoneos \
-                    -configuration Release \
-                    -archivePath $HOME/build/App.xcarchive \
-                    DEVELOPMENT_TEAM="$TEAM_ID" \
-                    CODE_SIGN_IDENTITY="Apple Distribution" \
-                    -allowProvisioningUpdates \
-                    archive
+                     -scheme "$XCODE_SCHEME" \
+                     -sdk iphoneos \
+                     -configuration Release \
+                     -archivePath $HOME/build/App.xcarchive \
+                     -destination 'generic/platform=iOS' \
+                     DEVELOPMENT_TEAM="$TEAM_ID" \
+                     -allowProvisioningUpdates \
+                     archive
 
           xcodebuild -exportArchive \
-                    -archivePath $HOME/build/App.xcarchive \
-                    -exportOptionsPlist ExportOptions.plist \
-                    -exportPath $HOME/build/ipa
+                     -archivePath $HOME/build/App.xcarchive \
+                     -exportOptionsPlist ExportOptions.plist \
+                     -exportPath $HOME/build/ipa
       - name: Upload to App Store
         script: |
           xcrun altool --upload-app -f $HOME/build/ipa/*.ipa \
