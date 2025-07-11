@@ -8,7 +8,7 @@ workflows:
         BUNDLE_ID: "papricut.app.mobile"
         APP_STORE_CONNECT_USERNAME: $APP_STORE_CONNECT_USERNAME
       groups:
-        - app_store_credentials
+        - Papricut
     triggering:
       events:
         - push
