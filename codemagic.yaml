@@ -3,12 +3,15 @@ workflows:
     name: iOS Distribute Workflow
     environment:
       vars:
-        XCODE_WORKSPACE: "ios/App/App.xcworkspace
+        XCODE_WORKSPACE: "ios/App/App.xcworkspace"  # ✅ Correct path and consistent indentation
         XCODE_SCHEME: "App"
         BUNDLE_ID: "papricut.app.mobile"
         APP_STORE_CONNECT_USERNAME: $APP_STORE_CONNECT_USERNAME
       groups:
         - app_store_credentials
+    triggering:
+      events:
+        - push
     scripts:
       - name: Set up keychain and code signing
         script: |
@@ -33,8 +36,8 @@ workflows:
           cd ios/App && pod install && cd ../..
       - name: Build .ipa with xcodebuild
         script: |
-          xcodebuild -workspace $XCODE_WORKSPACE \
-                     -scheme $XCODE_SCHEME \
+          xcodebuild -workspace "$XCODE_WORKSPACE" \
+                     -scheme "$XCODE_SCHEME" \
                      -sdk iphoneos \
                      -configuration Release \
                      -archivePath $HOME/build/App.xcarchive \
