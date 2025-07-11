@@ -5,23 +5,11 @@
   <key>method</key>
   <string>app-store</string>
 
-  <key>teamID</key>
-  <string>H9A4H444G4</string>
-
-  <key>uploadBitcode</key>
-  <true/>
-
-  <key>uploadSymbols</key>
-  <true/>
-
-  <key>compileBitcode</key>
-  <true/>
-
-  <key>destination</key>
-  <string>export</string>
-
   <key>signingStyle</key>
   <string>manual</string>
+
+  <key>teamID</key>
+  <string>H9A4H444G4</string>
 
   <key>provisioningProfiles</key>
   <dict>
@@ -34,6 +22,18 @@
 
   <key>stripSwiftSymbols</key>
   <true/>
+
+  <key>uploadBitcode</key>
+  <true/>
+
+  <key>uploadSymbols</key>
+  <true/>
+
+  <key>compileBitcode</key>
+  <true/>
+
+  <key>destination</key>
+  <string>export</string>
 
   <key>manageAppVersionAndBuildNumber</key>
   <false/>

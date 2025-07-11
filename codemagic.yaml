@@ -43,13 +43,13 @@ workflows:
                     -configuration Release \
                     -archivePath $HOME/build/App.xcarchive \
                     DEVELOPMENT_TEAM="$TEAM_ID" \
-                    PROVISIONING_PROFILE_SPECIFIER="$PROVISIONING_PROFILE_NAME"
+                    -allowProvisioningUpdates \
                     archive
 
           xcodebuild -exportArchive \
-                     -archivePath $HOME/build/App.xcarchive \
-                     -exportOptionsPlist ExportOptions.plist \
-                     -exportPath $HOME/build/ipa
+                    -archivePath $HOME/build/App.xcarchive \
+                    -exportOptionsPlist ExportOptions.plist \
+                    -exportPath $HOME/build/ipa
       - name: Upload to App Store
         script: |
           xcrun altool --upload-app -f $HOME/build/ipa/*.ipa \
