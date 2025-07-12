@@ -31,7 +31,11 @@ workflows:
           npx cap sync ios
           npx cap update ios
           cd ios/App && pod install && cd ../..
-
+      - name: Debug Provisioning Profile
+        script: |
+          mkdir -p ~/provision
+          echo "$PROVISIONING_PROFILE" | base64 --decode > ~/provision/profile.mobileprovision
+          security cms -D -i ~/provision/profile.mobileprovision
       - name: Build .ipa with xcodebuild (Automatic Signing)
         script: |
           echo "📦 Archiving the app..."
