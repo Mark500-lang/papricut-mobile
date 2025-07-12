@@ -2,6 +2,12 @@ workflows:
   ios-distribute:
     name: iOS Distribute Workflow
     integrations:
+      apple_certificate:
+        - certificate: CERTIFICATE_P12
+          password: CERTIFICATE_PASSWORD
+      provisioning_profile:
+        - bundle_id: papricut.app.mobile
+          provisioning_profile: PROVISIONING_PROFILE
       app_store_connect: Codemagic-key
     environment:
       vars:
@@ -11,13 +17,6 @@ workflows:
         TEAM_ID: "H9A4H444G4"
       groups:
         - Papricut
-      signing:
-        certificates:
-          - certificate: $CERTIFICATE_P12
-            password: $CERTIFICATE_PASSWORD
-        provisioning_profiles:
-          - bundle_id: papricut.app.mobile
-            provisioning_profile: $PROVISIONING_PROFILE
     triggering:
       events:
         - push
@@ -26,66 +25,34 @@ workflows:
         script: |
           npm install -g @ionic/cli
           npm ci
-          npm install
-
       - name: Clean DerivedData
         script: |
           rm -rf ~/Library/Developer/Xcode/DerivedData
-
       - name: Build Ionic project
         script: |
           ionic build --prod
           npx cap sync ios
           npx cap update ios
           cd ios/App && pod install && cd ../..
-
-      - name: Build .ipa with xcodebuild (Automatic Signing)
+      - name: Archive & Export IPA (Automatic Signing)
         script: |
-          echo "📦 Archiving the app..."
           xcodebuild -workspace "$XCODE_WORKSPACE" \
                      -scheme "$XCODE_SCHEME" \
-                     -sdk iphoneos \
                      -configuration Release \
+                     -sdk iphoneos \
                      -archivePath "$HOME/build/App.xcarchive" \
-                     -allowProvisioningUpdates \
-                     -destination 'generic/platform=iOS' \
                      DEVELOPMENT_TEAM="$TEAM_ID" \
-                     archive || {
-                       echo "❌ Archive failed.";
-                       exit 1;
-                     }
-
-          echo "📤 Exporting the IPA..."
+                     -allowProvisioningUpdates \
+                     archive
           xcodebuild -exportArchive \
                      -archivePath "$HOME/build/App.xcarchive" \
-                     -exportOptionsPlist <(echo '<?xml version="1.0" encoding="UTF-8"?>
-                      <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-                      <plist version="1.0">
-                      <dict>
-                        <key>method</key>
-                        <string>app-store</string>
-                        <key>signingStyle</key>
-                        <string>automatic</string>
-                        <key>stripSwiftSymbols</key>
-                        <true/>
-                        <key>uploadBitcode</key>
-                        <true/>
-                        <key>uploadSymbols</key>
-                        <true/>
-                      </dict>
-                      </plist>') \
-                     -exportPath "$HOME/build/ipa" || {
-                       echo "❌ Export failed.";
-                       exit 1;
-                     }
-
+                     -exportOptionsPlist ExportOptions.plist \
+                     -exportPath "$HOME/build/ipa"
       - name: Upload to App Store Connect
         script: |
-          app-store-connect-publisher \
-            submit \
+          app-store-connect-publisher submit \
             --path "$HOME/build/ipa/"*.ipa \
             --platform ios \
             --api-key Codemagic-key
-
     artifacts:
       - build/ipa/*.ipa
