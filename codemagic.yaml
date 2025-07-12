@@ -1,6 +1,6 @@
 workflows:
   ios-distribute:
-    name: iOS Distribute Workflow
+    name: iOS Distribute (Manual Signing)
     integrations:
       app_store_connect: Codemagic-key
     environment:
@@ -9,8 +9,9 @@ workflows:
         XCODE_SCHEME: "App"
         BUNDLE_ID: "papricut.app.mobile"
         TEAM_ID: "H9A4H444G4"
+        PROFILE_NAME: "Papricut_AppStore_2025"
       groups:
-        - Papricut  
+        - Papricut
     triggering:
       events:
         - push
@@ -32,23 +33,25 @@ workflows:
           npx cap update ios
           cd ios/App && pod install && cd ../..
 
-      - name: Debug Provisioning Profile
+      - name: Decode signing certificate and provisioning profile
         script: |
-          mkdir -p ~/provision
-          echo "$PROVISIONING_PROFILE" | base64 --decode > ~/provision/profile.mobileprovision
-          security cms -D -i ~/provision/profile.mobileprovision
+          echo "$DISTRIBUTION_CERTIFICATE" | base64 --decode > signing.p12
+          echo "$PROVISIONING_PROFILE" | base64 --decode > "$PROFILE_NAME.mobileprovision"
 
-      - name: Install Certificate & Provisioning Profile
+      - name: Install provisioning profile and certificate
         script: |
-          echo "$DISTRIBUTION_CERTIFICATE" | base64 --decode > certificate.p12
-          echo "$CERTIFICATE_PASSWORD" | security unlock-keychain -p $CERTIFICATE_PASSWORD ~/Library/Keychains/login.keychain
-          security import certificate.p12 -k ~/Library/Keychains/login.keychain -P $CERTIFICATE_PASSWORD -T /usr/bin/codesign
-
           mkdir -p ~/Library/MobileDevice/Provisioning\ Profiles
-          echo "$PROVISIONING_PROFILE" | base64 --decode > ~/Library/MobileDevice/Provisioning\ Profiles/$PROFILE_UUID.mobileprovision
-      - name: Build .ipa with xcodebuild (Automatic Signing)
+          PROFILE_UUID=$(grep -a -A1 UUID "$PROFILE_NAME.mobileprovision" | grep -oE "[A-F0-9\\-]{36}")
+          cp "$PROFILE_NAME.mobileprovision" ~/Library/MobileDevice/Provisioning\ Profiles/"$PROFILE_UUID".mobileprovision
+          security create-keychain -p "" build.keychain
+          security import signing.p12 -k build.keychain -P "" -T /usr/bin/codesign
+          security list-keychains -s build.keychain
+          security default-keychain -s build.keychain
+          security unlock-keychain -p "" build.keychain
+
+      - name: Build .ipa with xcodebuild (Manual Signing)
         script: |
-          echo "📦 Archiving the app..."
+          echo "📦 Archiving..."
           xcodebuild -workspace "$XCODE_WORKSPACE" \
                      -scheme "$XCODE_SCHEME" \
                      -sdk iphoneos \
@@ -57,24 +60,25 @@ workflows:
                      -allowProvisioningUpdates \
                      -destination 'generic/platform=iOS' \
                      DEVELOPMENT_TEAM="$TEAM_ID" \
+                     PROVISIONING_PROFILE_SPECIFIER="$PROFILE_NAME" \
+                     PRODUCT_BUNDLE_IDENTIFIER="$BUNDLE_ID" \
                      archive || {
-                       echo "❌ Archive failed.";
-                       exit 1;
+                       echo "❌ Archive failed."
+                       exit 1
                      }
 
-          echo "📤 Exporting the IPA..."
+          echo "📤 Exporting IPA..."
           xcodebuild -exportArchive \
                      -archivePath "$HOME/build/App.xcarchive" \
                      -exportOptionsPlist ExportOptions.plist \
                      -exportPath "$HOME/build/ipa" || {
-                       echo "❌ Export failed.";
-                       exit 1;
+                       echo "❌ Export failed."
+                       exit 1
                      }
 
       - name: Upload to App Store Connect
         script: |
-          app-store-connect-publisher \
-            submit \
+          app-store-connect-publisher submit \
             --path "$HOME/build/ipa/"*.ipa \
             --platform ios \
             --api-key Codemagic-key
