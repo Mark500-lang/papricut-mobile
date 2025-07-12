@@ -66,36 +66,41 @@ workflows:
           /usr/libexec/PlistBuddy -c "Add :objects:13D8C11F2543F3D900D83B1E:buildSettings:CODE_SIGNING_ALLOWED string NO" ios/App/Pods/Pods.xcodeproj/project.pbxproj
           /usr/libexec/PlistBuddy -c "Add :objects:13D8C11F2543F3D900D83B1E:buildSettings:CODE_SIGNING_REQUIRED string NO" ios/App/Pods/Pods.xcodeproj/project.pbxproj
 
-      - name: Build .ipa with xcodebuild (Manual Signing)
+     - name: Build .ipa with xcodebuild (Manual Signing)
         script: |
           echo "📦 Archiving..."
           xcodebuild -workspace "$XCODE_WORKSPACE" \
-                     -scheme "$XCODE_SCHEME" \
-                     -sdk iphoneos \
-                     -configuration Release \
-                     -archivePath "$HOME/build/App.xcarchive" \
-                     -allowProvisioningUpdates \
-                     -destination 'generic/platform=iOS' \
-                     DEVELOPMENT_TEAM="$TEAM_ID" \
-                     PRODUCT_BUNDLE_IDENTIFIER="$BUNDLE_ID" \
-                     CODE_SIGN_STYLE="Manual" \
-                     CODE_SIGN_IDENTITY="iPhone Distribution" \
-                     PROVISIONING_PROFILE_SPECIFIER="$PROFILE_NAME" \
-                     OTHER_CODE_SIGN_FLAGS="--keychain build.keychain" \
-                     archive || {
-                       echo "❌ Archive failed."
-                       xcodebuild -showBuildSettings -workspace "$XCODE_WORKSPACE" -scheme "$XCODE_SCHEME"
-                       exit 1
-                     }
+                    -scheme "$XCODE_SCHEME" \
+                    -sdk iphoneos \
+                    -configuration Release \
+                    -archivePath "$HOME/build/App.xcarchive" \
+                    -allowProvisioningUpdates \
+                    -destination 'generic/platform=iOS' \
+                    DEVELOPMENT_TEAM="$TEAM_ID" \
+                    PRODUCT_BUNDLE_IDENTIFIER="$BUNDLE_ID" \
+                    CODE_SIGN_STYLE="Manual" \
+                    CODE_SIGN_IDENTITY="iPhone Distribution" \
+                    PROVISIONING_PROFILE_SPECIFIER="$PROFILE_NAME" \
+                    OTHER_CODE_SIGN_FLAGS="--keychain build.keychain" \
+                    archive || {
+                      echo "❌ Archive failed."
+                      xcodebuild -showBuildSettings -workspace "$XCODE_WORKSPACE" -scheme "$XCODE_SCHEME"
+                      exit 1
+                    }
 
           echo "📤 Exporting IPA..."
           xcodebuild -exportArchive \
-                     -archivePath "$HOME/build/App.xcarchive" \
-                     -exportOptionsPlist ExportOptions.plist \
-                     -exportPath "$HOME/build/ipa" || {
-                       echo "❌ Export failed."
-                       exit 1
-                     }
+                    -archivePath "$HOME/build/App.xcarchive" \
+                    -exportOptionsPlist ExportOptions.plist \
+                    -exportPath "$HOME/build/ipa" \
+                    -allowProvisioningUpdates \
+                    CODE_SIGN_STYLE="Manual" \
+                    CODE_SIGN_IDENTITY="iPhone Distribution" \
+                    PROVISIONING_PROFILE_SPECIFIER="$PROFILE_NAME" \
+                    OTHER_CODE_SIGN_FLAGS="--keychain build.keychain" || {
+                      echo "❌ Export failed."
+                      exit 1
+                    }
 
       - name: Upload to App Store Connect
         script: |
