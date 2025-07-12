@@ -51,19 +51,34 @@ workflows:
           echo "📤 Exporting the IPA..."
           xcodebuild -exportArchive \
                      -archivePath "$HOME/build/App.xcarchive" \
-                     -exportOptionsPlist ExportOptions.plist \
+                     -exportOptionsPlist <(echo '<?xml version="1.0" encoding="UTF-8"?>
+                      <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+                      <plist version="1.0">
+                      <dict>
+                        <key>method</key>
+                        <string>app-store</string>
+                        <key>signingStyle</key>
+                        <string>automatic</string>
+                        <key>stripSwiftSymbols</key>
+                        <true/>
+                        <key>uploadBitcode</key>
+                        <true/>
+                        <key>uploadSymbols</key>
+                        <true/>
+                      </dict>
+                      </plist>')
                      -exportPath "$HOME/build/ipa" || {
                        echo "❌ Export failed.";
                        exit 1;
                      }
 
-      - name: Upload to App Store
+      - name: Upload to App Store Connect
         script: |
-          echo "🚀 Uploading IPA to App Store Connect..."
-          xcrun altool --upload-app -f "$HOME/build/ipa/"*.ipa \
-                       -t ios \
-                       --apiKey "$APP_STORE_CONNECT_PRIVATE_KEY_ID" \
-                       --apiIssuer "$APP_STORE_CONNECT_ISSUER_ID"
+          app-store-connect-publisher \
+            submit \
+            --path "$HOME/build/ipa/"*.ipa \
+            --platform ios \
+            --api-key Codemagic-key
 
     artifacts:
       - build/ipa/*.ipa
