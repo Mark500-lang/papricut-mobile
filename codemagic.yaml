@@ -110,5 +110,8 @@ workflows:
 
     publishing:
       app_store_connect:
-        api_key: Codemagic-key  # Must match the integration name above
+        auth: api_key
+        api_key: $APP_STORE_CONNECT_PRIVATE_KEY
+        key_id: $APP_STORE_CONNECT_KEY_ID
+        issuer_id: $APP_STORE_CONNECT_ISSUER_ID
         submit_to_testflight: true
