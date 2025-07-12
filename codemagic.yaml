@@ -66,7 +66,7 @@ workflows:
           /usr/libexec/PlistBuddy -c "Add :objects:13D8C11F2543F3D900D83B1E:buildSettings:CODE_SIGNING_ALLOWED string NO" ios/App/Pods/Pods.xcodeproj/project.pbxproj
           /usr/libexec/PlistBuddy -c "Add :objects:13D8C11F2543F3D900D83B1E:buildSettings:CODE_SIGNING_REQUIRED string NO" ios/App/Pods/Pods.xcodeproj/project.pbxproj
 
-     - name: Build .ipa with xcodebuild (Manual Signing)
+      - name: Build .ipa with xcodebuild (Manual Signing)
         script: |
           echo "📦 Archiving..."
           xcodebuild -workspace "$XCODE_WORKSPACE" \
