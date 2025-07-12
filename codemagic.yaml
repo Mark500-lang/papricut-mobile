@@ -1,3 +1,18 @@
+workflows:
+  ios-distribute:
+    name: iOS Distribute Workflow
+    environment:
+      vars:
+        XCODE_WORKSPACE: "ios/App/App.xcworkspace"
+        XCODE_SCHEME: "App"
+        BUNDLE_ID: "papricut.app.mobile"
+        TEAM_ID: "H9A4H444G4"
+        APP_STORE_CONNECT_USERNAME: $APP_STORE_CONNECT_USERNAME
+      groups:
+        - Papricut
+    triggering:
+      events:
+        - push
     scripts:
       - name: Set up keychain and import certificate + provisioning profile
         script: |
@@ -80,3 +95,6 @@
                        -t ios \
                        -u "$APP_STORE_CONNECT_USERNAME" \
                        -p "$APP_SPECIFIC_PASSWORD"
+
+    artifacts:
+      - build/ipa/*.ipa
