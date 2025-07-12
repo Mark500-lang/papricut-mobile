@@ -104,10 +104,29 @@ workflows:
 
       - name: Upload to App Store Connect
         script: |
-          app-store-connect-publisher submit \
-            --path "$HOME/build/ipa/"*.ipa \
-            --platform ios \
-            --api-key Codemagic-key
+          # Install app-store-connect CLI if needed
+          if ! command -v app-store-connect &> /dev/null; then
+            npm install -g @codemagic/app-store-connect-api-key
+          fi
+
+          # Find the IPA file
+          IPA_PATH=$(find "$HOME/build/ipa" -name "*.ipa" | head -n 1)
+          
+          if [ -z "$IPA_PATH" ]; then
+            echo "❌ No IPA file found in $HOME/build/ipa"
+            exit 1
+          fi
+
+          echo "📤 Uploading IPA to App Store Connect..."
+          xcrun altool --upload-app \
+                      --type ios \
+                      --file "$IPA_PATH" \
+                      --username "$APP_STORE_CONNECT_USERNAME" \
+                      --password "$APP_STORE_CONNECT_PASSWORD" \
+                      --asc-provider "$TEAM_ID" || {
+                        echo "❌ Upload failed"
+                        exit 1
+                      }
 
     artifacts:
       - build/ipa/*.ipa
