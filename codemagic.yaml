@@ -43,6 +43,9 @@ workflows:
           mkdir -p ~/Library/MobileDevice/Provisioning\ Profiles
           PROFILE_UUID=$(grep -a -A1 UUID "$PROFILE_NAME.mobileprovision" | grep -oE "[A-F0-9\\-]{36}")
           cp "$PROFILE_NAME.mobileprovision" ~/Library/MobileDevice/Provisioning\ Profiles/"$PROFILE_UUID".mobileprovision
+
+          echo "export PROFILE_UUID=$PROFILE_UUID" >> $CM_ENV   # 👈 THIS LINE IS KEY
+
           security create-keychain -p "" build.keychain
           security import signing.p12 -k build.keychain -P "" -T /usr/bin/codesign
           security list-keychains -s build.keychain
