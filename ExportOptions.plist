@@ -14,12 +14,16 @@
   <true/>
   <key>compileBitcode</key>
   <true/>
-  <key>destination</key>
-  <string>export</string>
   <key>provisioningProfiles</key>
   <dict>
     <key>papricut.app.mobile</key>
     <string>Papricut_AppStore_2025</string>
   </dict>
+  <key>signingCertificate</key>
+  <string>iPhone Distribution</string>
+  <key>teamID</key>
+  <string>H9A4H444G4</string>
+  <key>thinning</key>
+  <string>&lt;none&gt;</string>
 </dict>
 </plist>
