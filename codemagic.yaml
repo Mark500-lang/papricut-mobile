@@ -1,6 +1,7 @@
 workflows:
   ios-distribute:
     name: iOS Distribute (Manual Signing)
+    instance_type: mac_mini_m1
     integrations:
       app_store_connect: Codemagic-key
     environment:
@@ -10,88 +11,73 @@ workflows:
         BUNDLE_ID: "papricut.app.mobile"
         TEAM_ID: "H9A4H444G4"
         PROFILE_NAME: "Papricut_AppStore_2025"
-        APP_STORE_CONNECT_KEY_ID: $APP_STORE_CONNECT_KEY_ID  # Add these vars
-        APP_STORE_CONNECT_ISSUER_ID: $APP_STORE_CONNECT_ISSUER_ID
-        APP_STORE_CONNECT_PRIVATE_KEY: $APP_STORE_CONNECT_PRIVATE_KEY
+        CERTIFICATE_PASSWORD: $CERTIFICATE_PASSWORD
       groups:
         - Papricut
     triggering:
       events:
         - push
     scripts:
+      - name: Set up keychain and build directories
+        script: |
+          mkdir -p "$HOME/build/ipa"
+          security create-keychain -p "" build.keychain
+          security list-keychains -s build.keychain
+          security default-keychain -s build.keychain
+          security unlock-keychain -p "" build.keychain
+
       - name: Install dependencies
         script: |
           npm install -g @ionic/cli
           npm ci
           npm install
 
-      - name: Clean build environment
-        script: |
-          rm -rf ~/Library/Developer/Xcode/DerivedData/*
-          rm -rf "$HOME/build"
-          mkdir -p "$HOME/build"
-
       - name: Build Ionic project
         script: |
           ionic build --prod
           npx cap sync ios
           npx cap update ios
-          cd ios/App && pod install && cd ../..
+          cd ios/App && pod install --repo-update && cd ../..
 
-      - name: Decode signing certificate and provisioning profile
+      - name: Decode signing assets
         script: |
           echo "$DISTRIBUTION_CERTIFICATE" | base64 --decode > signing.p12
           echo "$PROVISIONING_PROFILE" | base64 --decode > "$PROFILE_NAME.mobileprovision"
-
-      - name: Install provisioning profile and certificate
-        script: |
-          mkdir -p ~/Library/MobileDevice/Provisioning\ Profiles
+          
+          # Install provisioning profile
           PROFILE_UUID=$(/usr/libexec/PlistBuddy -c 'Print UUID' /dev/stdin <<< $(security cms -D -i "$PROFILE_NAME.mobileprovision"))
+          mkdir -p ~/Library/MobileDevice/Provisioning\ Profiles
           cp "$PROFILE_NAME.mobileprovision" ~/Library/MobileDevice/Provisioning\ Profiles/"$PROFILE_UUID".mobileprovision
           echo "export PROFILE_UUID=$PROFILE_UUID" >> $CM_ENV
 
-          security create-keychain -p "" build.keychain
+          # Import certificate
           security import signing.p12 -k build.keychain -P "$CERTIFICATE_PASSWORD" -T /usr/bin/codesign
-          security list-keychains -s build.keychain
-          security default-keychain -s build.keychain
-          security unlock-keychain -p "" build.keychain
           security set-key-partition-list -S apple-tool:,apple: -k "" build.keychain
 
       - name: Verify signing assets
         script: |
           echo "Provisioning Profile UUID: $PROFILE_UUID"
           ls -la ~/Library/MobileDevice/Provisioning\ Profiles/
-          security find-identity -v -p codesigning
+          security find-identity -v -p codesigning build.keychain
 
-      - name: Configure Pods project for automatic signing
+      - name: Build and export IPA
         script: |
-          # Disable code signing for all Pods targets
-          /usr/libexec/PlistBuddy -c "Add :objects:13D8C11F2543F3D900D83B1E:buildSettings:CODE_SIGNING_ALLOWED string NO" ios/App/Pods/Pods.xcodeproj/project.pbxproj
-          /usr/libexec/PlistBuddy -c "Add :objects:13D8C11F2543F3D900D83B1E:buildSettings:CODE_SIGNING_REQUIRED string NO" ios/App/Pods/Pods.xcodeproj/project.pbxproj
-
-      - name: Build .ipa with xcodebuild (Manual Signing)
-        script: |
-          echo "📦 Archiving..."
+          # Archive
           xcodebuild -workspace "$XCODE_WORKSPACE" \
                     -scheme "$XCODE_SCHEME" \
                     -sdk iphoneos \
                     -configuration Release \
                     -archivePath "$HOME/build/App.xcarchive" \
                     -allowProvisioningUpdates \
-                    -destination 'generic/platform=iOS' \
                     DEVELOPMENT_TEAM="$TEAM_ID" \
                     PRODUCT_BUNDLE_IDENTIFIER="$BUNDLE_ID" \
                     CODE_SIGN_STYLE="Manual" \
                     CODE_SIGN_IDENTITY="iPhone Distribution" \
                     PROVISIONING_PROFILE_SPECIFIER="$PROFILE_NAME" \
                     OTHER_CODE_SIGN_FLAGS="--keychain build.keychain" \
-                    archive || {
-                      echo "❌ Archive failed."
-                      xcodebuild -showBuildSettings -workspace "$XCODE_WORKSPACE" -scheme "$XCODE_SCHEME"
-                      exit 1
-                    }
+                    archive
 
-          echo "📤 Exporting IPA..."
+          # Export IPA
           xcodebuild -exportArchive \
                     -archivePath "$HOME/build/App.xcarchive" \
                     -exportOptionsPlist ExportOptions.plist \
@@ -100,16 +86,20 @@ workflows:
                     CODE_SIGN_STYLE="Manual" \
                     CODE_SIGN_IDENTITY="iPhone Distribution" \
                     PROVISIONING_PROFILE_SPECIFIER="$PROFILE_NAME" \
-                    OTHER_CODE_SIGN_FLAGS="--keychain build.keychain" || {
-                      echo "❌ Export failed."
-                      exit 1
-                    }
+                    OTHER_CODE_SIGN_FLAGS="--keychain build.keychain"
+
+          # Verify IPA was created
+          if [ ! -f "$HOME/build/ipa/"*.ipa ]; then
+            echo "❌ Error: No IPA file was generated"
+            ls -la "$HOME/build/ipa/"
+            exit 1
+          fi
 
     artifacts:
-      - build/ipa/*.ipa
+      - $HOME/build/ipa/*.ipa
 
     publishing:
       app_store_connect:
-        auth: integration  # This must be "integration" not "api_key"
-        api_key: Codemagic-key  # Must match the integration name
+        auth: integration
+        api_key: Codemagic-key
         submit_to_testflight: true
