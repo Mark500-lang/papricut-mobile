@@ -11,6 +11,13 @@ workflows:
         TEAM_ID: "H9A4H444G4"
       groups:
         - Papricut
+      signing:
+        certificates:
+          - certificate: $CERTIFICATE_P12
+            password: $CERTIFICATE_PASSWORD
+        provisioning_profiles:
+          - bundle_id: papricut.app.mobile
+            provisioning_profile: $PROVISIONING_PROFILE
     triggering:
       events:
         - push
