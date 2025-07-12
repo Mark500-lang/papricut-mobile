@@ -104,9 +104,9 @@ workflows:
 
       - name: Upload to App Store Connect
         script: |
-          # Install required tools
-          brew install fastlane
-          
+          # Install required tools (without homebrew auto-update)
+          HOMEBREW_NO_AUTO_UPDATE=1 brew install fastlane
+
           # Find the IPA file
           IPA_PATH=$(find "$HOME/build/ipa" -name "*.ipa" | head -n 1)
           
@@ -117,7 +117,7 @@ workflows:
 
           echo "📤 Uploading IPA to App Store Connect using API key..."
           
-          # Create temporary key file
+          # Create temporary key file with proper formatting
           KEY_FILE="$HOME/asc_api_key.json"
           cat > "$KEY_FILE" <<EOF
           {
@@ -126,15 +126,26 @@ workflows:
             "key": "$(echo "$APP_STORE_CONNECT_PRIVATE_KEY" | sed 's/\\n/\n/g')"
           }
           EOF
-          
-          # Upload using fastlane
+
+          # Verify key file was created correctly
+          if ! grep -q "BEGIN PRIVATE KEY" "$KEY_FILE"; then
+            echo "❌ Private key formatting failed"
+            cat "$KEY_FILE"
+            exit 1
+          fi
+
+          # Upload using fastlane with verbose logging
+          FASTLANE_DISABLE_COLORS=1 \
+          FASTLANE_OPT_OUT_USAGE=1 \
           fastlane deliver \
             --ipa "$IPA_PATH" \
             --api_key_path "$KEY_FILE" \
             --app_identifier "$BUNDLE_ID" \
+            --team_id "$TEAM_ID" \
             --skip_metadata \
             --skip_screenshots \
-            --force || {
+            --force \
+            --verbose || {
               echo "❌ Upload failed"
               rm -f "$KEY_FILE"
               exit 1
