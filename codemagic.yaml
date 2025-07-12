@@ -1,39 +1,57 @@
 workflows:
-  ios-build:
-    name: iOS App Store Release
+  ios-distribute:
+    name: iOS Distribute (Manual Signing)
+    integrations:
+      app_store_connect: Codemagic-key
     environment:
       vars:
         XCODE_WORKSPACE: "ios/App/App.xcworkspace"
         XCODE_SCHEME: "App"
         BUNDLE_ID: "papricut.app.mobile"
-        PROFILE_NAME: "Papricut_AppStore_2025"
         TEAM_ID: "H9A4H444G4"
-      xcode: 16.4
-      cocoapods: default
-      node: 18.16.0
-      ios_signing:
-        provisioning_profiles:
-          - PROFILE_NAME
+        PROFILE_NAME: "Papricut_AppStore_2025"
+      groups:
+        - Papricut
+    triggering:
+      events:
+        - push
     scripts:
       - name: Install dependencies
         script: |
+          npm install -g @ionic/cli
           npm ci
+          npm install
+
+      - name: Clean DerivedData
+        script: |
+          rm -rf ~/Library/Developer/Xcode/DerivedData
+
+      - name: Build Ionic project
+        script: |
+          ionic build --prod
           npx cap sync ios
-      - name: Decode signing assets
+          npx cap update ios
+          cd ios/App && pod install && cd ../..
+
+      - name: Decode signing certificate and provisioning profile
         script: |
-          echo $DISTRIBUTION_CERTIFICATE | base64 --decode > certificate.p12
-          echo $PROVISIONING_PROFILE | base64 --decode > profile.mobileprovision
-      - name: Set up keychain and provisioning
+          echo "$DISTRIBUTION_CERTIFICATE" | base64 --decode > signing.p12
+          echo "$PROVISIONING_PROFILE" | base64 --decode > "$PROFILE_NAME.mobileprovision"
+
+      - name: Install provisioning profile and certificate
         script: |
+          mkdir -p ~/Library/MobileDevice/Provisioning\ Profiles
+          PROFILE_UUID=$(grep -a -A1 UUID "$PROFILE_NAME.mobileprovision" | grep -oE "[A-F0-9\\-]{36}")
+          cp "$PROFILE_NAME.mobileprovision" ~/Library/MobileDevice/Provisioning\ Profiles/"$PROFILE_UUID".mobileprovision
           security create-keychain -p "" build.keychain
+          security import signing.p12 -k build.keychain -P "" -T /usr/bin/codesign
+          security list-keychains -s build.keychain
           security default-keychain -s build.keychain
           security unlock-keychain -p "" build.keychain
-          security import certificate.p12 -k build.keychain -P "$CERTIFICATE_PASSWORD" -T /usr/bin/codesign
-          mkdir -p ~/Library/MobileDevice/Provisioning\ Profiles
-          PROFILE_UUID=$(grep -a -A1 UUID profile.mobileprovision | grep -oE '[A-F0-9\-]{36}')
-          cp profile.mobileprovision ~/Library/MobileDevice/Provisioning\ Profiles/$PROFILE_UUID.mobileprovision
-      - name: Archive app
+
+      - name: Build .ipa with xcodebuild (Manual Signing)
         script: |
+          echo "📦 Archiving..."
           xcodebuild -workspace "$XCODE_WORKSPACE" \
                      -scheme "$XCODE_SCHEME" \
                      -sdk iphoneos \
@@ -41,53 +59,29 @@ workflows:
                      -archivePath "$HOME/build/App.xcarchive" \
                      -allowProvisioningUpdates \
                      -destination 'generic/platform=iOS' \
-                     CODE_SIGN_STYLE=Manual \
                      DEVELOPMENT_TEAM="$TEAM_ID" \
                      PROVISIONING_PROFILE_SPECIFIER="$PROFILE_NAME" \
                      PRODUCT_BUNDLE_IDENTIFIER="$BUNDLE_ID" \
-                     archive
-      - name: Export .ipa
-        script: |
-          cat > ExportOptions.plist <<EOF
-          <?xml version="1.0" encoding="UTF-8"?>
-          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-          <plist version="1.0">
-          <dict>
-            <key>method</key>
-            <string>app-store</string>
-            <key>signingStyle</key>
-            <string>manual</string>
-            <key>provisioningProfiles</key>
-            <dict>
-              <key>papricut.app.mobile</key>
-              <string>$PROFILE_NAME</string>
-            </dict>
-            <key>stripSwiftSymbols</key>
-            <true/>
-            <key>uploadBitcode</key>
-            <true/>
-            <key>uploadSymbols</key>
-            <true/>
-            <key>compileBitcode</key>
-            <true/>
-            <key>destination</key>
-            <string>export</string>
-          </dict>
-          </plist>
-          EOF
+                     archive || {
+                       echo "❌ Archive failed."
+                       exit 1
+                     }
 
+          echo "📤 Exporting IPA..."
           xcodebuild -exportArchive \
                      -archivePath "$HOME/build/App.xcarchive" \
                      -exportOptionsPlist ExportOptions.plist \
-                     -exportPath "$HOME/build"
+                     -exportPath "$HOME/build/ipa" || {
+                       echo "❌ Export failed."
+                       exit 1
+                     }
+
       - name: Upload to App Store Connect
         script: |
-          xcrun altool --upload-app \
-            -f "$HOME/build/App.ipa" \
-            --type ios \
-            --apiKey "$APP_STORE_CONNECT_API_KEY_ID" \
-            --apiIssuer "$APP_STORE_CONNECT_ISSUER_ID"
+          app-store-connect-publisher submit \
+            --path "$HOME/build/ipa/"*.ipa \
+            --platform ios \
+            --api-key Codemagic-key
+
     artifacts:
-      - build/*.ipa
-      - build/*.dSYM.zip
-      - ExportOptions.plist
+      - build/ipa/*.ipa
