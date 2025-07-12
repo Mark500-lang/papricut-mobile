@@ -38,11 +38,14 @@ workflows:
           echo "$PROVISIONING_PROFILE" | base64 --decode > ~/provision/profile.mobileprovision
           security cms -D -i ~/provision/profile.mobileprovision
 
-      - name: Install Provisioning Profile
+      - name: Install Certificate & Provisioning Profile
         script: |
-          mkdir -p ~/Library/MobileDevice/Provisioning\ Profiles
-          echo "$PROVISIONING_PROFILE" | base64 --decode > ~/Library/MobileDevice/Provisioning\ Profiles/profile.mobileprovision
+          echo "$DISTRIBUTION_CERTIFICATE" | base64 --decode > certificate.p12
+          echo "$CERTIFICATE_PASSWORD" | security unlock-keychain -p $CERTIFICATE_PASSWORD ~/Library/Keychains/login.keychain
+          security import certificate.p12 -k ~/Library/Keychains/login.keychain -P $CERTIFICATE_PASSWORD -T /usr/bin/codesign
 
+          mkdir -p ~/Library/MobileDevice/Provisioning\ Profiles
+          echo "$PROVISIONING_PROFILE" | base64 --decode > ~/Library/MobileDevice/Provisioning\ Profiles/$PROFILE_UUID.mobileprovision
       - name: Build .ipa with xcodebuild (Automatic Signing)
         script: |
           echo "📦 Archiving the app..."
