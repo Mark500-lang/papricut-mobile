@@ -1,38 +1,32 @@
-workflows:
-  ios-distribute:
-    name: iOS Distribute Workflow
-    environment:
-      vars:
-        XCODE_WORKSPACE: "ios/App/App.xcworkspace"
-        XCODE_SCHEME: "App"
-        BUNDLE_ID: "papricut.app.mobile"
-        TEAM_ID: "H9A4H444G4"
-        APP_STORE_CONNECT_USERNAME: $APP_STORE_CONNECT_USERNAME
-      groups:
-        - Papricut
-    triggering:
-      events:
-        - push
     scripts:
       - name: Set up keychain and import certificate + provisioning profile
         script: |
-          # Decode certificate
+          echo "🔐 Decoding certificate..."
           echo $DISTRIBUTION_CERTIFICATE | base64 --decode > certificate.p12
 
-          # Decode provisioning profile
+          echo "📄 Decoding provisioning profile..."
           echo $PROVISIONING_PROFILE | base64 --decode > profile.mobileprovision
 
-          # Set up keychain
+          echo "🔑 Setting up keychain..."
           security create-keychain -p "" build.keychain
           security default-keychain -s build.keychain
           security unlock-keychain -p "" build.keychain
-          security import certificate.p12 -k build.keychain -P "$CERTIFICATE_PASSWORD" -T /usr/bin/codesign
+          security import certificate.p12 -k build.keychain -P "$CERTIFICATE_PASSWORD" -T /usr/bin/codesign || {
+            echo "❌ Failed to import certificate. Check password or file.";
+            exit 1;
+          }
+
+          echo "🔓 Allowing codesign access to the keychain..."
           security set-key-partition-list -S apple-tool:,apple: -s -k "" build.keychain > /dev/null
 
-          # Install provisioning profile
+          echo "📦 Installing provisioning profile..."
           mkdir -p "$HOME/Library/MobileDevice/Provisioning Profiles"
-          UUID=$(security cms -D -i profile.mobileprovision | plutil -extract UUID xml1 -o - - | xmllint --xpath "string(//string)" -)
+          UUID=$(security cms -D -i profile.mobileprovision | plutil -extract UUID xml1 -o - - | xmllint --xpath "string(//string)" -) || {
+            echo "❌ Failed to extract UUID from provisioning profile.";
+            exit 1;
+          }
           cp profile.mobileprovision "$HOME/Library/MobileDevice/Provisioning Profiles/$UUID.mobileprovision"
+          echo "✅ Provisioning Profile UUID: $UUID"
 
       - name: Install dependencies
         script: |
@@ -53,30 +47,36 @@ workflows:
 
       - name: Build .ipa with xcodebuild
         script: |
+          echo "📦 Archiving the app..."
           xcodebuild -workspace "$XCODE_WORKSPACE" \
                      -scheme "$XCODE_SCHEME" \
                      -sdk iphoneos \
                      -configuration Release \
-                     -archivePath $HOME/build/App.xcarchive \
+                     -archivePath "$HOME/build/App.xcarchive" \
                      -destination 'generic/platform=iOS' \
-                     DEVELOPMENT_TEAM="$TEAM_ID" \
-                     CODE_SIGN_STYLE=Manual \
+                     CODE_SIGN_STYLE="Manual" \
                      CODE_SIGN_IDENTITY="Apple Distribution" \
-                     PROVISIONING_PROFILE="$UUID" \
+                     DEVELOPMENT_TEAM="$TEAM_ID" \
+                     PROVISIONING_PROFILE_SPECIFIER="Papricut_AppStore_2025" \
                      -allowProvisioningUpdates \
-                     archive
+                     archive || {
+                       echo "❌ Archive failed.";
+                       exit 1;
+                     }
 
+          echo "📤 Exporting the IPA..."
           xcodebuild -exportArchive \
-                     -archivePath $HOME/build/App.xcarchive \
+                     -archivePath "$HOME/build/App.xcarchive" \
                      -exportOptionsPlist ExportOptions.plist \
-                     -exportPath $HOME/build/ipa
+                     -exportPath "$HOME/build/ipa" || {
+                       echo "❌ Export failed.";
+                       exit 1;
+                     }
 
       - name: Upload to App Store
         script: |
-          xcrun altool --upload-app -f $HOME/build/ipa/*.ipa \
+          echo "🚀 Uploading IPA to App Store Connect..."
+          xcrun altool --upload-app -f "$HOME/build/ipa/"*.ipa \
                        -t ios \
                        -u "$APP_STORE_CONNECT_USERNAME" \
                        -p "$APP_SPECIFIC_PASSWORD"
-
-    artifacts:
-      - build/ipa/*.ipa
