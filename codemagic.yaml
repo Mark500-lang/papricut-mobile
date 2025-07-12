@@ -1,9 +1,6 @@
 workflows:
   ios-distribute:
     name: iOS Distribute Workflow
-    integrations:
-      app_store_connect:
-        api_key: Codemagic-key
     environment:
       vars:
         XCODE_WORKSPACE: "ios/App/App.xcworkspace"
@@ -66,7 +63,7 @@ workflows:
                         <key>uploadSymbols</key>
                         <true/>
                       </dict>
-                      </plist>')
+                      </plist>') \
                      -exportPath "$HOME/build/ipa" || {
                        echo "❌ Export failed.";
                        exit 1;
@@ -74,8 +71,7 @@ workflows:
 
       - name: Upload to App Store Connect
         script: |
-          app-store-connect-publisher \
-            submit \
+          app-store-connect-publisher submit \
             --path "$HOME/build/ipa/"*.ipa \
             --platform ios \
             --api-key Codemagic-key
