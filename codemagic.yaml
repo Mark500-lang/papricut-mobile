@@ -2,7 +2,7 @@ workflows:
   ios-distribute:
     name: iOS Distribute (Manual Signing)
     integrations:
-      app_store_connect: Codemagic-key  # Linked API key from Codemagic UI
+      app_store_connect: Codemagic-key
     environment:
       vars:
         XCODE_WORKSPACE: "ios/App/App.xcworkspace"
@@ -10,8 +10,11 @@ workflows:
         BUNDLE_ID: "papricut.app.mobile"
         TEAM_ID: "H9A4H444G4"
         PROFILE_NAME: "Papricut_AppStore_2025"
+        APP_STORE_CONNECT_KEY_ID: $APP_STORE_CONNECT_KEY_ID  # Add these vars
+        APP_STORE_CONNECT_ISSUER_ID: $APP_STORE_CONNECT_ISSUER_ID
+        APP_STORE_CONNECT_PRIVATE_KEY: $APP_STORE_CONNECT_PRIVATE_KEY
       groups:
-        - Papricut  # Contains signing credentials
+        - Papricut
     triggering:
       events:
         - push
@@ -105,7 +108,6 @@ workflows:
     artifacts:
       - build/ipa/*.ipa
 
-    # Native App Store Connect publishing (replaces custom upload script)
     publishing:
       app_store_connect:
         auth:
