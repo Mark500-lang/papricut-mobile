@@ -2,7 +2,7 @@ workflows:
   ios-distribute:
     name: iOS Distribute (Manual Signing)
     integrations:
-      app_store_connect: Codemagic-key
+      app_store_connect: Codemagic-key  # Linked API key from Codemagic UI
     environment:
       vars:
         XCODE_WORKSPACE: "ios/App/App.xcworkspace"
@@ -11,7 +11,7 @@ workflows:
         TEAM_ID: "H9A4H444G4"
         PROFILE_NAME: "Papricut_AppStore_2025"
       groups:
-        - Papricut
+        - Papricut  # Contains signing credentials
     triggering:
       events:
         - push
@@ -102,57 +102,11 @@ workflows:
                       exit 1
                     }
 
-      - name: Upload to App Store Connect
-        script: |
-          # Install required tools (without homebrew auto-update)
-          HOMEBREW_NO_AUTO_UPDATE=1 brew install fastlane
-
-          # Find the IPA file
-          IPA_PATH=$(find "$HOME/build/ipa" -name "*.ipa" | head -n 1)
-          
-          if [ -z "$IPA_PATH" ]; then
-            echo "❌ No IPA file found in $HOME/build/ipa"
-            exit 1
-          fi
-
-          echo "📤 Uploading IPA to App Store Connect using API key..."
-          
-          # Create temporary key file with proper formatting
-          KEY_FILE="$HOME/asc_api_key.json"
-          cat > "$KEY_FILE" <<EOF
-          {
-            "key_id": "$APP_STORE_CONNECT_KEY_ID",
-            "issuer_id": "$APP_STORE_CONNECT_ISSUER_ID",
-            "key": "$(echo "$APP_STORE_CONNECT_PRIVATE_KEY" | sed 's/\\n/\n/g')"
-          }
-          EOF
-
-          # Verify key file was created correctly
-          if ! grep -q "BEGIN PRIVATE KEY" "$KEY_FILE"; then
-            echo "❌ Private key formatting failed"
-            cat "$KEY_FILE"
-            exit 1
-          fi
-
-          # Upload using fastlane with verbose logging
-          FASTLANE_DISABLE_COLORS=1 \
-          FASTLANE_OPT_OUT_USAGE=1 \
-          fastlane deliver \
-            --ipa "$IPA_PATH" \
-            --api_key_path "$KEY_FILE" \
-            --app_identifier "$BUNDLE_ID" \
-            --team_id "$TEAM_ID" \
-            --skip_metadata \
-            --skip_screenshots \
-            --force \
-            --verbose || {
-              echo "❌ Upload failed"
-              rm -f "$KEY_FILE"
-              exit 1
-            }
-          
-          # Clean up
-          rm -f "$KEY_FILE"
-
     artifacts:
       - build/ipa/*.ipa
+
+    # Native App Store Connect publishing (replaces custom upload script)
+    publishing:
+      app_store_connect:
+        api_key: Codemagic-key  # Must match the integration name above
+        submit_to_testflight: true  # Set to false for App Store only
