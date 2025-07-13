@@ -27,21 +27,29 @@ workflows:
 
       - name: Clean Install Dependencies
         script: |
-          # Clean slate with verbose output
-          echo "=== CLEANING ENVIRONMENT ==="
-          rm -rf node_modules package-lock.json .angular/cache www ios/App/App/public ios/App/App/www
+          # Clean slate with forced removal
+          rm -rf node_modules package-lock.json .angular/cache
           
-          # Install exact versions with forced resolution
-          echo "=== INSTALLING DEPENDENCIES ==="
-          npm ci --legacy-peer-deps --no-audit --force
-          npx npm-force-resolutions
+          # Install with exact versions and forced resolution
+          npm install --legacy-peer-deps --no-audit --force
+          npm install @angular-devkit/build-angular@17.3.17 --save-dev --force
           
-          # Verify critical packages
-          echo "=== VERIFYING INSTALLATIONS ==="
-          npm list @angular-devkit/build-angular @angular/cli @ionic/angular
-          ng version
-          ionic info
-
+          # Verify the critical package exists
+          ls -la node_modules/@angular-devkit/build-angular/package.json
+          
+          # Rebuild node-sass if needed
+          npm rebuild node-sass
+          
+          # Verify installations
+          npm list @angular-devkit/build-angular @angular/cli
+      - name: Verify Angular Builder
+        script: |
+          if [ ! -d "node_modules/@angular-devkit/build-angular" ]; then
+            echo "❌ CRITICAL: Angular build tools still missing!"
+            echo "Installed packages:"
+            npm list --depth=0
+            exit 1
+          fi
       - name: Build Production Assets (Robust)
         script: |
           # Clean and verify environment
