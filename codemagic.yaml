@@ -97,32 +97,28 @@ workflows:
             exit 1
           fi
 
-          # Verify critical files exist (using both hashed and non-hashed patterns)
-          REQUIRED_FILES=(
+          # Verify critical files exist (using hashed filename patterns)
+          REQUIRED_PATTERNS=(
             "index.html"
             "main.*.js"
-            "main.js"
             "polyfills.*.js"
-            "polyfills.js"
             "runtime.*.js"
-            "runtime.js"
             "styles.*.css"
-            "styles.css"
             "assets/"
           )
 
           MISSING_FILES=0
-          for pattern in "${REQUIRED_FILES[@]}"; do
+          for pattern in "${REQUIRED_PATTERNS[@]}"; do
             if ! compgen -G "www/$pattern" > /dev/null; then
-              echo "⚠️ Missing file pattern: www/$pattern"
+              echo "❌ Missing required file pattern: www/$pattern"
               MISSING_FILES=$((MISSING_FILES+1))
             fi
           done
 
           if [ $MISSING_FILES -gt 0 ]; then
-            echo "❌ Critical files missing - build failed"
-            echo "www contents:"
+            echo "=== BUILD OUTPUT CONTENTS ==="
             ls -la www/
+            echo "❌ Critical files missing - build failed"
             exit 1
           fi
 
