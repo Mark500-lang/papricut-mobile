@@ -1,7 +1,8 @@
 require_relative '../../node_modules/@capacitor/ios/scripts/pods_helpers'
 
 platform :ios, '13.0'
-use_frameworks!
+# Changed to static framework linking
+use_frameworks! :linkage => :static
 
 # workaround to avoid Xcode caching of Pods that requires
 # Product -> Clean Build Folder after new Cordova plugins installed
@@ -32,26 +33,24 @@ end
 post_install do |installer|
   assertDeploymentTarget(installer)
   
-  # Disable code signing for all Pods targets
+  # Main fixes for App Store submission:
   installer.pods_project.targets.each do |target|
     target.build_configurations.each do |config|
-      # Completely disable code signing
-      config.build_settings['CODE_SIGNING_ALLOWED'] = 'NO'
-      config.build_settings['CODE_SIGNING_REQUIRED'] = 'NO'
-      config.build_settings['CODE_SIGN_IDENTITY'] = ''
-      config.build_settings['PROVISIONING_PROFILE_SPECIFIER'] = ''
-      config.build_settings['DEVELOPMENT_TEAM'] = ''
-      
-      # Explicitly mark as static frameworks
+      # 1. Ensure static framework linking
       config.build_settings['MACH_O_TYPE'] = 'staticlib'
       config.build_settings['BUILD_LIBRARY_FOR_DISTRIBUTION'] = 'YES'
       
-      # Capacitor-specific optimizations
+      # 2. Fix bundle identifier conflicts
+      config.build_settings['PRODUCT_BUNDLE_IDENTIFIER'] = '$(PRODUCT_BUNDLE_IDENTIFIER)'
+      
+      # 3. Disable code signing for pods (handled at app level)
+      config.build_settings['CODE_SIGNING_ALLOWED'] = 'NO'
+      config.build_settings['CODE_SIGNING_REQUIRED'] = 'NO'
+      
+      # 4. Capacitor-specific optimizations
       if target.name.include?('Capacitor') || target.name.include?('Cordova')
         config.build_settings['ENABLE_BITCODE'] = 'NO'
         config.build_settings['ALWAYS_EMBED_SWIFT_STANDARD_LIBRARIES'] = 'NO'
-        config.build_settings['SUPPORTS_MACCATALYST'] = 'NO'
-        config.build_settings['IPHONEOS_DEPLOYMENT_TARGET'] = '13.0'
       end
     end
   end
@@ -59,10 +58,10 @@ post_install do |installer|
   # Xcode 14+ compatibility
   installer.pods_project.build_configurations.each do |config|
     config.build_settings.delete('VALID_ARCHS')
-    config.build_settings['ONLY_ACTIVE_ARCH'] = 'YES'
+    config.build_settings['ONLY_ACTIVE_ARCH'] = 'NO' # Changed to NO for release builds
   end
   
-  # Fix framework search paths
+  # Framework search paths optimization
   installer.pods_project.build_configurations.each do |config|
     config.build_settings['FRAMEWORK_SEARCH_PATHS'] = ['$(inherited)', '$(PODS_CONFIGURATION_BUILD_DIR)']
   end
