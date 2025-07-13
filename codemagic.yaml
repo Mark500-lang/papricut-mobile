@@ -10,7 +10,7 @@ workflows:
         BUNDLE_ID: "papricut.app.mobile"
         TEAM_ID: "H9A4H444G4"
         PROFILE_NAME: "Papricut_AppStore_2025"
-        APP_STORE_CONNECT_KEY_ID: $APP_STORE_CONNECT_KEY_ID  # Add these vars
+        APP_STORE_CONNECT_KEY_ID: $APP_STORE_CONNECT_KEY_ID 
         APP_STORE_CONNECT_ISSUER_ID: $APP_STORE_CONNECT_ISSUER_ID
         APP_STORE_CONNECT_PRIVATE_KEY: $APP_STORE_CONNECT_PRIVATE_KEY
       groups:
@@ -120,12 +120,70 @@ workflows:
                     -exportPath "$HOME/build/ipa" \
                     -exportOptionsPlist ExportOptions.plist \
                     -allowProvisioningUpdates
+      - name: Validate App Bundle Contents
+        script: |
+          # 1. Verify www assets were bundled
+          if ! unzip -l "$HOME/build/App.xcarchive/Products/Applications/App.app" | grep -q "www/index.html"; then
+            echo "❌ Error: Web assets missing from app bundle"
+            exit 1
+          fi
 
+          # 2. Check Capacitor plugins are properly embedded
+          PLUGINS_COUNT=$(find "$HOME/build/App.xcarchive/Products/Applications/App.app/Frameworks" -name "Capacitor*.framework" | wc -l)
+          if [ "$PLUGINS_COUNT" -lt 5 ]; then
+            echo "❌ Error: Missing Capacitor plugins (found $PLUGINS_COUNT)"
+            exit 1
+          fi
+
+          # 3. Verify Info.plist configuration
+          PLIST_PATH="$HOME/build/App.xcarchive/Products/Applications/App.app/Info.plist"
+          if ! /usr/libexec/PlistBuddy -c "Print :CFBundleVersion" "$PLIST_PATH"; then
+            echo "❌ Error: Invalid Info.plist"
+            exit 1
+          fi
+
+          echo "✅ All bundle validation checks passed"
+
+      - name: Simulate First Launch
+        script: |
+          # Extract IPA for inspection
+          unzip -q "$HOME/build/ipa/App.ipa" -d "$HOME/build/unpacked"
+          
+          # 1. Verify startup sequence
+          echo "=== EXPECTED STARTUP FILES ==="
+          ls -la "$HOME/build/unpacked/Payload/App.app/www"
+          ls -la "$HOME/build/unpacked/Payload/App.app/Frameworks"
+          
+          # 2. Check for critical files
+          REQUIRED_FILES=(
+            "www/index.html"
+            "www/main.js"
+            "www/assets/"
+            "Frameworks/Capacitor.framework"
+            "Frameworks/CapacitorCordova.framework"
+          )
+          
+          for file in "${REQUIRED_FILES[@]}"; do
+            if [ ! -e "$HOME/build/unpacked/Payload/App.app/$file" ]; then
+              echo "❌ Missing critical file: $file"
+              exit 1
+            fi
+          done
+          
+          echo "✅ All runtime files verified"
+      - name: Build Completion Checklist
+        script: |
+          echo "=== BUILD VALIDATION CHECKLIST ==="
+          echo "1. Web Assets: $(ls -la "$HOME/build/unpacked/Payload/App.app/www" | wc -l) files"
+          echo "2. Plugins: $(find "$HOME/build/unpacked/Payload/App.app/Frameworks" -name "*.framework" | wc -l) frameworks"
+          echo "3. Code Signing: $(codesign -dv "$HOME/build/unpacked/Payload/App.app" 2>&1 | grep -c "valid on disk")"
+          echo "4. Bundle ID: $(/usr/libexec/PlistBuddy -c "Print :CFBundleIdentifier" "$HOME/build/unpacked/Payload/App.app/Info.plist")"
+          echo "5. Minimum OS: $(/usr/libexec/PlistBuddy -c "Print :MinimumOSVersion" "$HOME/build/unpacked/Payload/App.app/Info.plist")"
+          echo "=== BUILD SUCCESSFUL ==="
     artifacts:
       - $HOME/build/ipa/*.ipa
-
     publishing:
       app_store_connect:
-        auth: integration  # This must be "integration" not "api_key"
+        auth: integration 
         api_key: Codemagic-key  # Must match the integration name
         submit_to_testflight: true

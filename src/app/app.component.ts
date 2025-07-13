@@ -10,13 +10,14 @@ import {
 import { SplashScreen } from '@capacitor/splash-screen';
 import { StatusBar } from '@capacitor/status-bar';
 import { App as CapacitorApp } from '@capacitor/app';
-// import { PushNotifications } from '@capacitor/push-notifications'; // DISABLED for now
+import { Network } from '@capacitor/network';
+import { Storage } from '@ionic/storage';
+import { environment } from 'src/environments/environment';
 
+// Services
 import { ApiService } from './services/api.service';
 import { NetworkService } from './services/network.service';
 import { AuthService } from './services/auth.service';
-import { Storage } from '@ionic/storage';
-import { environment } from 'src/environments/environment';
 
 @Component({
   selector: 'app-root',
@@ -26,10 +27,10 @@ import { environment } from 'src/environments/environment';
 export class AppComponent implements OnInit {
   currentVersion = environment.currentVersion;
   isActionSheetOpen = false;
-  data: any;
+  private networkListener: any;
 
   constructor(
-    public storage: Storage,
+    private storage: Storage,
     private platform: Platform,
     private router: Router,
     private alertCtrl: AlertController,
@@ -43,168 +44,172 @@ export class AppComponent implements OnInit {
 
   async ngOnInit() {
     try {
-      await this.initStorage();
-      await this.authService.initializeAuth();
-
-      this.platform.ready().then(async () => {
-        await StatusBar.setBackgroundColor({ color: '#d1378c' });
-        await StatusBar.setOverlaysWebView({ overlay: true });
-
-        await SplashScreen.hide();
-        this.checkCanGoBack();
-
-        // 👇 Safely skip push notification setup
-        this.safeInitPushNotification();
-
-        const isAuth = await this.authService.getIsAuthenticatedValue();
-        this.router.navigate([isAuth ? '/home' : '/welcome']);
-
-        this.checkForUpdate();
-      });
+      await this.initializeApp();
     } catch (error) {
-      console.error('Error during app initialization:', error);
+      console.error('Bootstrap failed:', error);
+      this.showFatalError();
     }
   }
 
-  async initStorage() {
+  private async initializeApp() {
+    // 1. Initialize storage first
     await this.storage.create();
+
+    // 2. Wait for platform readiness
+    await this.platform.ready();
+
+    // 3. Configure UI
+    await this.configureUI();
+
+    // 4. Initialize auth state
+    await this.authService.initializeAuth();
+
+    // 5. Setup network monitoring
+    this.setupNetworkListener();
+
+    // 6. Check for updates
+    this.safeCheckForUpdate();
+
+    // 7. Navigate based on auth state
+    this.navigateBasedOnAuth();
   }
 
-  checkCanGoBack() {
+  private async configureUI() {
+    try {
+      await StatusBar.setBackgroundColor({ color: '#d1378c' });
+      await StatusBar.setOverlaysWebView({ overlay: true });
+      await SplashScreen.hide();
+      this.setupBackButtonHandler();
+    } catch (error) {
+      console.warn('UI configuration failed:', error);
+    }
+  }
+
+  private setupBackButtonHandler() {
     CapacitorApp.addListener('backButton', ({ canGoBack }) => {
-      if (!canGoBack) {
-        this.isActionSheetOpen = true;
-        this.presentBackActionSheet();
+      if (!canGoBack && !this.isActionSheetOpen) {
+        this.presentExitConfirmation();
       } else {
         window.history.back();
       }
     });
   }
 
-  async presentBackActionSheet() {
+  private async presentExitConfirmation() {
+    this.isActionSheetOpen = true;
     const actionSheet = await this.actionSheetCtrl.create({
-      header: 'Do you want to close the app?',
+      header: 'Exit App?',
       buttons: [
         {
-          text: 'Yes',
-          handler: () => {
-            this.isActionSheetOpen = false;
-            this.exitApp();
-          },
+          text: 'Exit',
+          icon: 'power',
+          handler: () => CapacitorApp.exitApp()
         },
         {
           text: 'Cancel',
           role: 'cancel',
-          handler: () => {
-            this.isActionSheetOpen = false;
-          },
-        },
-      ],
+          handler: () => this.isActionSheetOpen = false
+        }
+      ]
     });
-
     await actionSheet.present();
   }
 
-  exitApp() {
-    CapacitorApp.exitApp();
-  }
-
-  async logout() {
-    const alert = await this.alertCtrl.create({
-      header: 'Confirm',
-      message: 'Do you want to logout from the App?',
-      buttons: [
-        { text: 'Cancel', role: 'cancel' },
-        {
-          text: 'Yes',
-          handler: () => {
-            this.authService.clearAuthentication();
-            this.router.navigate(['/welcome']);
-          },
-        },
-      ],
-    });
-    await alert.present();
-  }
-
-  /**
-   * This method is stubbed to prevent crashing due to missing Firebase config.
-   * Replace with OneSignal or actual push logic once ready.
-   */
-  safeInitPushNotification() {
-    console.warn(
-      '[Push] PushNotifications skipped. Firebase not configured (no google-services.json).'
-    );
-
-    // ❗ You can conditionally integrate OneSignal or Pushy SDK here later
-  }
-
-  SendTokenToServer(fcmToken: any) {
-    this.apiService.SendTokenToServer(fcmToken).then(
-      (result: any) => {
-        this.data = result;
-      },
-      (err: any) => {
-        this.toast('Error sending FCM token.');
+  private setupNetworkListener() {
+    this.networkListener = Network.addListener('networkStatusChange', status => {
+      if (!status.connected) {
+        this.toast('You are offline. Some features may not work.');
       }
-    );
-  }
-
-  checkForUpdate() {
-    const platform = this.platform.is('android') ? 'android' : 'ios';
-
-    this.apiService.checkVersion(platform).then(
-      (result: any) => {
-        this.data = result;
-        if (this.data?.result?.code == 1) {
-          this.PresentAlertCheck(this.data.result);
-        }
-      },
-      (err: any) => {
-        this.toast('Version check failed.');
-      }
-    );
-  }
-
-  async PresentAlertCheck(data: any) {
-    const alert = await this.alertCtrl.create({
-      header: data.title,
-      message: data.message,
-      buttons: ['Ok'],
     });
+  }
+
+  private async navigateBasedOnAuth() {
+    try {
+      const isAuth = await this.authService.getIsAuthenticatedValue();
+      const initialRoute = isAuth ? '/home' : '/welcome';
+      await this.router.navigate([initialRoute], { replaceUrl: true });
+    } catch (error) {
+      console.error('Navigation failed:', error);
+      this.router.navigate(['/welcome'], { replaceUrl: true });
+    }
+  }
+
+  private async safeCheckForUpdate() {
+    try {
+      if (!environment.production) return;
+      
+      const platform = this.platform.is('android') ? 'android' : 'ios';
+      const response = await this.apiService.checkVersion(platform) as any;
+      
+      if (response?.result?.code === 1) {
+        await this.handleUpdateResponse(response.result);
+      }
+    } catch (error) {
+      console.warn('Version check failed:', error);
+    }
+  }
+  
+  private async handleUpdateResponse(updateData: any) {
+    const alert = await this.alertCtrl.create({
+      header: updateData.title || 'Update Available',
+      message: updateData.message || 'A new version is available.',
+      buttons: updateData.force ? ['Update Now'] : ['Later', 'Update Now']
+    });
+
     await alert.present();
 
-    if (data.force === true) {
+    if (updateData.force) {
       alert.onDidDismiss().then(() => {
-        window.open(data.url, '_system');
+        window.open(updateData.url, '_system');
+        CapacitorApp.exitApp();
       });
     }
   }
 
-  async presentAlertForeGround(data: any) {
+  async logout() {
     const alert = await this.alertCtrl.create({
-      header: data.title || 'Notification',
-      message: data.body || 'You have a new message.',
-      buttons: ['Ok'],
+      header: 'Confirm Logout',
+      message: 'Are you sure you want to sign out?',
+      buttons: [
+        {
+          text: 'Cancel',
+          role: 'cancel'
+        },
+        {
+          text: 'Logout',
+          handler: async () => {
+            await this.authService.clearAuthentication();
+            this.router.navigate(['/welcome'], { replaceUrl: true });
+          }
+        }
+      ]
     });
     await alert.present();
   }
 
-  async toast(txt: any) {
+  private showFatalError() {
+    this.alertCtrl.create({
+      header: 'App Error',
+      message: 'A critical error occurred. Please restart the app.',
+      backdropDismiss: false,
+      buttons: [{
+        text: 'Exit',
+        handler: () => CapacitorApp.exitApp()
+      }]
+    }).then(alert => alert.present());
+  }
+
+  async toast(message: string) {
     const toast = await this.toastController.create({
-      message: txt,
+      message,
       duration: 2000,
       position: 'bottom',
-      mode: 'ios',
-      color: 'dark',
+      color: 'dark'
     });
-
     toast.present();
   }
 
-  // Empty methods for future features
-  shareApp() {}
-  settings() {}
-  myaccount() {}
-  home() {}
+  ngOnDestroy() {
+    this.networkListener?.remove();
+  }
 }

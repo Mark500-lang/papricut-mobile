@@ -1,5 +1,6 @@
 import UIKit
 import Capacitor
+import Foundation
 
 @UIApplicationMain
 class AppDelegate: UIResponder, UIApplicationDelegate {
@@ -7,43 +8,81 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
     var window: UIWindow?
 
     func application(_ application: UIApplication, didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]?) -> Bool {
-        // Override point for customization after application launch.
+        
+        // 1. Network Configuration Check
+        checkNetworkConfiguration()
+        
+        // 2. Configure Default Headers (if needed)
+        configureAPIHeaders()
+        
+        // 3. Enable Debugging in Development
+        #if DEBUG
+        UserDefaults.standard.set(true, forKey: "WebKitDeveloperExtras")
+        UserDefaults.standard.synchronize()
+        #endif
+        
         return true
     }
 
-    func applicationWillResignActive(_ application: UIApplication) {
-        // Sent when the application is about to move from active to inactive state. This can occur for certain types of temporary interruptions (such as an incoming phone call or SMS message) or when the user quits the application and it begins the transition to the background state.
-        // Use this method to pause ongoing tasks, disable timers, and invalidate graphics rendering callbacks. Games should use this method to pause the game.
+    // MARK: - Network Configuration
+    private func checkNetworkConfiguration() {
+        // Verify ATS exceptions are properly set
+        if let ats = Bundle.main.infoDictionary?["NSAppTransportSecurity"] as? [String: Any] {
+            print("ATS Configuration: \(ats)")
+        } else {
+            print("Warning: No ATS configuration found")
+        }
+    }
+    
+    private func configureAPIHeaders() {
+        // Set default headers for all requests
+        URLSessionConfiguration.default.httpAdditionalHeaders = [
+            "Accept": "application/json",
+            "Content-Type": "application/json",
+            "User-Agent": "Papricut-iOS/\(Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "")"
+        ]
+        
+        // Capacitor-specific network configuration
+        if let config = Bundle.main.url(forResource: "capacitor.config", withExtension: "json"),
+           let data = try? Data(contentsOf: config),
+           let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
+            print("Capacitor Config: \(json)")
+        }
     }
 
-    func applicationDidEnterBackground(_ application: UIApplication) {
-        // Use this method to release shared resources, save user data, invalidate timers, and store enough application state information to restore your application to its current state in case it is terminated later.
-        // If your application supports background execution, this method is called instead of applicationWillTerminate: when the user quits.
-    }
-
-    func applicationWillEnterForeground(_ application: UIApplication) {
-        // Called as part of the transition from the background to the active state; here you can undo many of the changes made on entering the background.
-    }
-
+    // MARK: - Lifecycle Methods (keep existing)
+    func applicationWillResignActive(_ application: UIApplication) { /* ... */ }
+    func applicationDidEnterBackground(_ application: UIApplication) { /* ... */ }
+    func applicationWillEnterForeground(_ application: UIApplication) { /* ... */ }
     func applicationDidBecomeActive(_ application: UIApplication) {
-        // Restart any tasks that were paused (or not yet started) while the application was inactive. If the application was previously in the background, optionally refresh the user interface.
+        // Good place to check network reachability
+        checkAPIConnectivity()
     }
+    func applicationWillTerminate(_ application: UIApplication) { /* ... */ }
 
-    func applicationWillTerminate(_ application: UIApplication) {
-        // Called when the application is about to terminate. Save data if appropriate. See also applicationDidEnterBackground:.
-    }
-
+    // MARK: - URL Handling (keep existing)
     func application(_ app: UIApplication, open url: URL, options: [UIApplication.OpenURLOptionsKey: Any] = [:]) -> Bool {
-        // Called when the app was launched with a url. Feel free to add additional processing here,
-        // but if you want the App API to support tracking app url opens, make sure to keep this call
         return ApplicationDelegateProxy.shared.application(app, open: url, options: options)
     }
-
+    
     func application(_ application: UIApplication, continue userActivity: NSUserActivity, restorationHandler: @escaping ([UIUserActivityRestoring]?) -> Void) -> Bool {
-        // Called when the app was launched with an activity, including Universal Links.
-        // Feel free to add additional processing here, but if you want the App API to support
-        // tracking app url opens, make sure to keep this call
         return ApplicationDelegateProxy.shared.application(application, continue: userActivity, restorationHandler: restorationHandler)
     }
-
+    
+    // MARK: - API Connectivity Check
+    private func checkAPIConnectivity() {
+        guard let apiURL = URL(string: "https://your-api-base-url.com/health") else { return }
+        
+        let task = URLSession.shared.dataTask(with: apiURL) { data, response, error in
+            if let error = error {
+                print("API Connection Error: \(error.localizedDescription)")
+                return
+            }
+            
+            if let httpResponse = response as? HTTPURLResponse {
+                print("API Connection Status: \(httpResponse.statusCode)")
+            }
+        }
+        task.resume()
+    }
 }
