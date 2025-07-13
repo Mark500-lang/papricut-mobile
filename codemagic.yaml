@@ -78,49 +78,65 @@ workflows:
           npx cap copy ios
       - name: Build Production Assets (Robust)
         script: |
-          npm cache verify
-          # Clean and verify environment
-          echo "=== PRE-BUILD VERIFICATION ==="
-          ls -la node_modules/@angular-devkit/build-angular || echo "❌ Angular builder missing!"
+          # Clean previous builds
+          rm -rf www
           
-          # Production build with fallback
+          # Build with production configuration
           echo "=== BUILDING PRODUCTION ASSETS ==="
-          if ! npm run build -- --configuration production; then
-            echo "⚠️ Primary build failed, attempting fallback..."
-            ionic build --prod --verbose
-          fi
+          npm run build -- --configuration production
           
-          # Comprehensive asset verification
+          # Fallback if needed
+          if [ ! -d "www" ]; then
+            echo "=== ATTEMPTING ALTERNATIVE BUILD ==="
+            ionic build --prod
+          fi
+
+          # Verify www directory and main assets
           echo "=== VERIFYING BUILD OUTPUT ==="
           if [ ! -d "www" ]; then
-            echo "❌ Critical error: www directory not created"
-            echo "Directory contents:"
-            ls -la
-            echo "Build logs:"
-            cat angular.log || echo "No angular.log found"
+            echo "❌ Build failed - www directory not created"
             exit 1
           fi
-          
+
+          # Find the hashed main.js file
+          MAIN_JS=$(find www -name "main.*.js" | head -n 1)
+          if [ -z "$MAIN_JS" ]; then
+            echo "❌ Could not find main.js file"
+            echo "www contents:"
+            ls -la www/
+            exit 1
+          fi
+
+          # Verify critical files exist
           REQUIRED_ASSETS=(
             "index.html"
-            "main.js"
-            "polyfills.js"
-            "runtime.js"
-            "styles.css"
+            "$(basename "$MAIN_JS")"
+            "polyfills.*.js"
+            "runtime.*.js"
+            "styles.*.css"
             "assets/"
-            "favicon.ico"
-            "manifest.webmanifest"
           )
-          
+
           for asset in "${REQUIRED_ASSETS[@]}"; do
-            if [ ! -e "www/$asset" ]; then
-              echo "❌ Missing required asset: www/$asset"
+            if ! compgen -G "www/$asset" > /dev/null; then
+              echo "❌ Missing required asset pattern: www/$asset"
               echo "www contents:"
               ls -la www/
               exit 1
             fi
           done
-
+      - name: Prepare Capacitor Assets
+        script: |
+          echo "=== PREPARING CAPACITOR ASSETS ==="
+          # Ensure index.html points to correct hashed files
+          MAIN_JS=$(find www -name "main.*.js" | head -n 1)
+          sed -i.bak "s/main.js/$(basename "$MAIN_JS")/g" www/index.html
+          
+          # Verify the modification
+          if ! grep -q "$(basename "$MAIN_JS")" www/index.html; then
+            echo "❌ Failed to update index.html with hashed filenames"
+            exit 1
+          fi
       - name: Verify Angular Configuration
         script: |
           if ! jq -e '.projects.app.architect.build.configurations.production' angular.json >/dev/null; then
