@@ -13,6 +13,7 @@ workflows:
         APP_STORE_CONNECT_KEY_ID: $APP_STORE_CONNECT_KEY_ID 
         APP_STORE_CONNECT_ISSUER_ID: $APP_STORE_CONNECT_ISSUER_ID
         APP_STORE_CONNECT_PRIVATE_KEY: $APP_STORE_CONNECT_PRIVATE_KEY
+        NODE_OPTIONS: "--max-old-space-size=4096"
       groups:
         - Papricut
     triggering:
@@ -22,127 +23,100 @@ workflows:
       - name: Install System Dependencies
         script: |
           brew install jq
-          npm install -g @angular/cli @ionic/cli native-run cordova-res
+          npm install -g @angular/cli@17.3.17 @ionic/cli@7.2.1 native-run cordova-res
 
-      - name: Install Dependencies
+      - name: Clean Install Dependencies
         script: |
-          # Clean slate
-          rm -rf node_modules package-lock.json
+          # Clean slate with verbose output
+          echo "=== CLEANING ENVIRONMENT ==="
+          rm -rf node_modules package-lock.json .angular/cache www ios/App/App/public ios/App/App/www
           
-          # Install exact versions
-          npm install --legacy-peer-deps --no-audit
-          npm install -g @angular/cli@17.3.17 @ionic/cli@7.2.1
-          
-          # Force update critical packages
+          # Install exact versions with forced resolution
+          echo "=== INSTALLING DEPENDENCIES ==="
+          npm ci --legacy-peer-deps --no-audit --force
           npx npm-force-resolutions
           
-          # Verify installations
+          # Verify critical packages
+          echo "=== VERIFYING INSTALLATIONS ==="
+          npm list @angular-devkit/build-angular @angular/cli @ionic/angular
           ng version
           ionic info
 
-      - name: Build Production Assets
+      - name: Build Production Assets (Robust)
         script: |
-          # Clean previous builds
-          rm -rf www
+          # Clean and verify environment
+          echo "=== PRE-BUILD VERIFICATION ==="
+          ls -la node_modules/@angular-devkit/build-angular || echo "❌ Angular builder missing!"
           
-          # Build with production configuration
-          npm run build -- --configuration production
+          # Production build with fallback
+          echo "=== BUILDING PRODUCTION ASSETS ==="
+          if ! npm run build -- --configuration production; then
+            echo "⚠️ Primary build failed, attempting fallback..."
+            ionic build --prod --verbose
+          fi
           
-          # Verify www directory
+          # Comprehensive asset verification
+          echo "=== VERIFYING BUILD OUTPUT ==="
           if [ ! -d "www" ]; then
-            echo "❌ Build failed - www directory not created"
+            echo "❌ Critical error: www directory not created"
+            echo "Directory contents:"
+            ls -la
+            echo "Build logs:"
+            cat angular.log || echo "No angular.log found"
             exit 1
           fi
           
-          # Verify critical files
-          REQUIRED_FILES=(
-            "index.html"
-            "main.js"
-            "polyfills.js"
-            "runtime.js"
-            "styles.css"
-          )
-          
-          for file in "${REQUIRED_FILES[@]}"; do
-            if [ ! -f "www/$file" ]; then
-              echo "❌ Missing required file: www/$file"
-              exit 1
-            fi
-          done
-
-      - name: Sync Capacitor
-        script: |
-          npx cap sync ios --deployment
-          
-          # Verify iOS assets
-          if [ ! -d "ios/App/App/public" ] && [ ! -d "ios/App/App/www" ]; then
-            echo "❌ Capacitor sync failed - no web assets in iOS project"
-            exit 1
-          fi
-
-      - name: Clean Build Environment
-        script: |
-          rm -rf ~/Library/Developer/Xcode/DerivedData/*
-          rm -rf "$HOME/build"
-          mkdir -p "$HOME/build"
-
-      - name: Verify Angular Config
-        script: |
-          if ! jq -e '.projects.app.architect.build.configurations.production' angular.json >/dev/null; then
-            echo "❌ Missing production build config in angular.json"
-            exit 1
-          fi
-
-      - name: Build Ionic Project
-        script: |
-          # Clean environment
-          rm -rf www node_modules/.cache .angular/cache
-          
-          # Set memory limits
-          export NODE_OPTIONS="--max-old-space-size=4096"
-          export NODE_ENV=production
-          
-          # Production build with verbose output
-          echo "=== STARTING PRODUCTION BUILD ==="
-          ionic build --prod --verbose -- --output-hashing=all --source-map --stats-json 2>&1 | tee build.log
-          
-          # Verify build output
-          if [ ! -d "www" ]; then
-            echo "❌ Build failed - www directory not created"
-            grep -A 20 -B 20 -i "error" build.log || cat build.log
-            exit 1
-          fi
-          
-          # Verify critical files
-          REQUIRED_FILES=(
+          REQUIRED_ASSETS=(
             "index.html"
             "main.js"
             "polyfills.js"
             "runtime.js"
             "styles.css"
             "assets/"
+            "favicon.ico"
+            "manifest.webmanifest"
           )
           
-          for file in "${REQUIRED_FILES[@]}"; do
-            if [ ! -e "www/$file" ]; then
-              echo "❌ Missing required file: www/$file"
+          for asset in "${REQUIRED_ASSETS[@]}"; do
+            if [ ! -e "www/$asset" ]; then
+              echo "❌ Missing required asset: www/$asset"
+              echo "www contents:"
+              ls -la www/
               exit 1
             fi
           done
 
-      - name: Prepare Native Assets
+      - name: Verify Angular Configuration
         script: |
-          # Generate splash screens and icons
-          cordova-res ios --skip-config --copy
-          
-          # Sync web assets to native project
-          npx cap sync ios --deployment
-          
-          # Verify sync
-          if [ ! -d "ios/App/App/public" ] && [ ! -d "ios/App/App/www" ]; then
-            echo "❌ Capacitor sync failed - no web assets in native project"
+          if ! jq -e '.projects.app.architect.build.configurations.production' angular.json >/dev/null; then
+            echo "❌ Missing production build config in angular.json"
+            echo "Current configurations:"
+            jq '.projects.app.architect.build.configurations' angular.json
             exit 1
           fi
+
+      - name: Sync Capacitor (Robust)
+        script: |
+          echo "=== SYNCING WEB ASSETS TO IOS ==="
+          npx cap sync ios --deployment
+          npx cap copy ios
+          
+          # Verify iOS assets with multiple checks
+          if [ ! -d "ios/App/App/public" ] && [ ! -d "ios/App/App/www" ]; then
+            echo "❌ Capacitor sync failed - checking alternative locations..."
+            find ios/App/App -name "index.html" || echo "No web assets found"
+            exit 1
+          fi
+          
+          echo "=== GENERATING NATIVE ASSETS ==="
+          cordova-res ios --skip-config --copy
+          npx cap sync ios
+
+      - name: Clean Build Environment
+        script: |
+          rm -rf ~/Library/Developer/Xcode/DerivedData/*
+          rm -rf "$HOME/build"
+          mkdir -p "$HOME/build"
 
       - name: Decode Signing Assets
         script: |
@@ -179,7 +153,7 @@ workflows:
           /usr/libexec/PlistBuddy -c "Set CFBundleVersion $NEW_BUILD" "$PLIST_PATH"
           echo "Updated build number from $CURRENT_BUILD to $NEW_BUILD"
 
-      - name: Build IPA
+      - name: Build IPA (Robust)
         script: |
           export NSUnbufferedIO=YES
           
@@ -208,18 +182,35 @@ workflows:
                     -exportOptionsPlist ExportOptions.plist \
                     -allowProvisioningUpdates | tee "$HOME/build/export_log.txt"
 
-      - name: Validate Bundle
+      - name: Validate Bundle (Comprehensive)
         script: |
           APP_PATH="$HOME/build/App.xcarchive/Products/Applications/App.app"
           
           # Verify web assets
-          if [ ! -d "$APP_PATH/www" ] && [ ! -d "$APP_PATH/public" ]; then
+          WEB_ASSET_PATH="$APP_PATH/www" || "$APP_PATH/public"
+          if [ ! -d "$WEB_ASSET_PATH" ]; then
             echo "❌ Web assets missing from app bundle"
-            find "$APP_PATH" -maxdepth 1
+            echo "App bundle contents:"
+            find "$APP_PATH" -maxdepth 2
             exit 1
           fi
           
-          # Verify plugins
+          # Verify critical web files
+          WEB_FILES=(
+            "index.html"
+            "main.js"
+            "runtime.js"
+            "styles.css"
+          )
+          
+          for file in "${WEB_FILES[@]}"; do
+            if [ ! -f "$WEB_ASSET_PATH/$file" ]; then
+              echo "❌ Missing web file: $WEB_ASSET_PATH/$file"
+              exit 1
+            fi
+          done
+          
+          # Verify native plugins
           REQUIRED_PLUGINS=(
             "Capacitor.framework"
             "CapacitorCordova.framework"
@@ -228,7 +219,9 @@ workflows:
           
           for plugin in "${REQUIRED_PLUGINS[@]}"; do
             if [ ! -d "$APP_PATH/Frameworks/$plugin" ]; then
-              echo "❌ Missing plugin: $plugin"
+              echo "❌ Missing plugin framework: $plugin"
+              echo "Existing frameworks:"
+              ls -la "$APP_PATH/Frameworks/"
               exit 1
             fi
           done
@@ -236,16 +229,21 @@ workflows:
           # Verify splash screen
           if [ ! -f "$APP_PATH/Base.lproj/LaunchScreen.storyboardc" ]; then
             echo "❌ Missing compiled splash screen"
+            echo "Launch assets:"
+            find "$APP_PATH" -name "*.storyboard*"
             exit 1
           fi
 
-      - name: Final Checks
+      - name: Final Verification
         script: |
-          echo "=== BUILD VALIDATION ==="
-          echo "App Version: $(/usr/libexec/PlistBuddy -c "Print CFBundleShortVersionString" "$HOME/build/App.xcarchive/Products/Applications/App.app/Info.plist")"
-          echo "Web Assets: $(find "$HOME/build/App.xcarchive/Products/Applications/App.app/www" -type f | wc -l) files"
-          echo "Plugins: $(find "$HOME/build/App.xcarchive/Products/Applications/App.app/Frameworks" -name "*.framework" | wc -l) frameworks"
-          codesign -dv --verbose=4 "$HOME/build/App.xcarchive/Products/Applications/App.app"
+          echo "=== FINAL BUILD VALIDATION ==="
+          APP_PATH="$HOME/build/App.xcarchive/Products/Applications/App.app"
+          echo "App Version: $(/usr/libexec/PlistBuddy -c "Print CFBundleShortVersionString" "$APP_PATH/Info.plist")"
+          echo "Build Version: $(/usr/libexec/PlistBuddy -c "Print CFBundleVersion" "$APP_PATH/Info.plist")"
+          echo "Web Assets: $(find "$APP_PATH/www" -type f | wc -l) files"
+          echo "Plugin Frameworks: $(find "$APP_PATH/Frameworks" -name "*.framework" | wc -l)"
+          codesign -dv --verbose=4 "$APP_PATH"
+          plutil -convert xml1 "$APP_PATH/Info.plist" -o - | xmllint --format -
 
     artifacts:
       - $HOME/build/ipa/*.ipa
