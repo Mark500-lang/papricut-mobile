@@ -27,31 +27,24 @@ workflows:
 
       - name: Clean Install Dependencies
         script: |
-          # Clean environment completely
-          echo "=== CLEANING ENVIRONMENT ==="
-          rm -rf node_modules package-lock.json .angular/cache ~/.npm
-          npm cache clean --force  # <-- ADD THIS LINE
-          npx clear-npx-cache  # <-- ADD THIS LINE
+          # Clean environment
+          rm -rf node_modules package-lock.json .angular/cache
+          npm cache clean --force
           
-          # Use supported Node.js version (Angular 17 requires 16.x or 18.x)
-          nvm install 18.18.2
-          nvm use 18.18.2
-          
-          # Install exact versions of problematic packages first
-          echo "=== INSTALLING CORE DEPENDENCIES ==="
-          npm install @ionic/angular-toolkit@7.1.1 \
-                    @ionic/storage@4.0.1 \
-                    @angular-devkit/build-angular@17.3.17 \
-                    --save-exact --legacy-peer-deps --no-audit
-          
-          # Full install with forced resolution
-          echo "=== INSTALLING REMAINING DEPENDENCIES ==="
-          npm install --legacy-peer-deps --no-audit --force
+          # Install with flexible versions
+          npm install --legacy-peer-deps --no-audit
           
           # Verify critical packages
-          echo "=== VERIFICATION ==="
           npm list @ionic/angular-toolkit @ionic/storage @angular-devkit/build-angular
-          ng version
+      - name: Fallback Installation
+        if: failure()
+        script: |
+          echo "=== ATTEMPTING FALLBACK INSTALLATION ==="
+          npm install @ionic/angular-toolkit@latest \
+                    @ionic/storage@latest \
+                    @angular-devkit/build-angular@latest \
+                    --save-exact --legacy-peer-deps --no-audit
+          npm install
       - name: Verify and Repair Dependencies
         script: |
           # Check if angular-toolkit installed correctly
