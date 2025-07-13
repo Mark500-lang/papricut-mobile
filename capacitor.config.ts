@@ -4,7 +4,6 @@ const config: CapacitorConfig = {
   appId: 'papricut.app.mobile',
   appName: 'Papricut',
   webDir: 'www',
-  bundledWebRuntime: false, // Recommended for Angular
   server: {
     hostname: 'papricut.com',
     androidScheme: 'https',

@@ -27,45 +27,39 @@ workflows:
 
       - name: Clean Install Dependencies
         script: |
-          # Clean environment
-          rm -rf node_modules package-lock.json .angular/cache
+          # Clean environment completely
+          echo "=== CLEANING ENVIRONMENT ==="
+          rm -rf node_modules package-lock.json .angular/cache ~/.npm
           npm cache clean --force
           
-          # Install with flexible versions
-          npm install --legacy-peer-deps --no-audit
+          # Use corepack for consistent package manager
+          corepack enable
+          corepack prepare yarn@stable --activate
           
-          # Verify critical packages
-          npm list @ionic/angular-toolkit @ionic/storage @angular-devkit/build-angular
+          # Install with yarn (more reliable dependency resolution)
+          yarn install --ignore-engines --network-timeout 600000
 
-      - name: Fallback Installation
+      - name: Verify Critical Dependencies
         script: |
-          if [ "$CM_PREVIOUS_STEP_STATUS" != "success" ]; then
-            echo "=== ATTEMPTING COMPATIBLE FALLBACK INSTALLATION ==="
-            npm install @ionic/angular-toolkit@7.1.1 \
-                      @ionic/storage@4.0.0 \
-                      @angular-devkit/build-angular@17.3.17 \
-                      --save-exact --legacy-peer-deps --no-audit --force
-            npm install --legacy-peer-deps --force
-          fi
+          echo "=== VERIFYING DEPENDENCIES ==="
+          yarn list @angular-devkit/build-angular @ionic/angular-toolkit @ionic/storage
+          ng version
 
-      - name: Verify and Repair Dependencies
+      - name: Build Web Assets
         script: |
-          # Check if angular-toolkit installed correctly
-          if [ ! -d "node_modules/@ionic/angular-toolkit" ]; then
-            echo "⚠️ Ionic Angular Toolkit missing - installing latest compatible version"
-            npm install @ionic/angular-toolkit@latest --save-dev --legacy-peer-deps
-          fi
+          echo "=== BUILDING WEB ASSETS ==="
+          npm run build -- --configuration production
           
-          # Final verification
-          npm list @ionic/angular-toolkit @angular-devkit/build-angular || exit 1
-      - name: Verify Angular Builder
-        script: |
-          if [ ! -d "node_modules/@angular-devkit/build-angular" ]; then
-            echo "❌ CRITICAL: Angular build tools still missing!"
-            echo "Installed packages:"
-            npm list --depth=0
-            exit 1
+          # Verify www directory exists
+          if [ ! -d "www" ]; then
+            echo "❌ www directory not created - attempting alternative build"
+            ionic build --prod
           fi
+
+      - name: Capacitor Sync
+        script: |
+          echo "=== SYNCING WITH CAPACITOR ==="
+          npx cap sync ios
       - name: Build Production Assets (Robust)
         script: |
           npm cache verify
