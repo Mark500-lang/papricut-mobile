@@ -40,12 +40,12 @@ workflows:
       - name: Fallback Installation
         script: |
           if [ "$CM_PREVIOUS_STEP_STATUS" != "success" ]; then
-            echo "=== ATTEMPTING FALLBACK INSTALLATION ==="
-            npm install @ionic/angular-toolkit@latest \
-                      @ionic/storage@latest \
-                      @angular-devkit/build-angular@latest \
-                      --save-exact --legacy-peer-deps --no-audit
-            npm install
+            echo "=== ATTEMPTING COMPATIBLE FALLBACK INSTALLATION ==="
+            npm install @ionic/angular-toolkit@7.1.1 \
+                      @ionic/storage@4.0.0 \
+                      @angular-devkit/build-angular@17.3.17 \
+                      --save-exact --legacy-peer-deps --no-audit --force
+            npm install --legacy-peer-deps --force
           fi
 
       - name: Verify and Repair Dependencies
