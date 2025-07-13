@@ -80,43 +80,39 @@ workflows:
           echo "Updated build number from $CURRENT_BUILD to $NEW_BUILD"
           cat "$PLIST_PATH" | grep -A 1 CFBundleVersion
 
-      - name: Build .ipa with xcodebuild (Manual Signing)
+      - name: Configure Capacitor for App Store
         script: |
-          echo "📦 Archiving..."
+          # 1. Update Podfile for static frameworks
+          echo "use_frameworks! :linkage => :static" >> ios/App/Podfile
+          
+          # 2. Reinstall pods with static linkage
+          cd ios/App && pod install --repo-update
+          cd ../..
+          
+          # 3. Verify framework types
+          file ios/App/App/Frameworks/Capacitor.framework/Capacitor | grep "statically linked"
+
+      - name: Build .ipa with fixed settings
+        script: |
           xcodebuild -workspace "$XCODE_WORKSPACE" \
-                    -scheme "App" \
+                    -scheme "$XCODE_SCHEME" \
                     -sdk iphoneos \
-                    CURRENT_PROJECT_VERSION=1 \
-                    MARKETING_VERSION=4.3 \
                     -configuration Release \
                     -archivePath "$HOME/build/App.xcarchive" \
-                    -allowProvisioningUpdates \
-                    -destination 'generic/platform=iOS' \
+                    CURRENT_PROJECT_VERSION=2 \
+                    MARKETING_VERSION=4.3 \
                     DEVELOPMENT_TEAM="$TEAM_ID" \
                     PRODUCT_BUNDLE_IDENTIFIER="$BUNDLE_ID" \
                     CODE_SIGN_STYLE="Manual" \
-                    CODE_SIGN_IDENTITY="iPhone Distribution" \
                     PROVISIONING_PROFILE_SPECIFIER="$PROFILE_NAME" \
                     OTHER_CODE_SIGN_FLAGS="--keychain build.keychain" \
-                    archive || {
-                      echo "❌ Archive failed."
-                      xcodebuild -showBuildSettings -workspace "$XCODE_WORKSPACE" -scheme "$XCODE_SCHEME"
-                      exit 1
-                    }
+                    archive
 
-          echo "📤 Exporting IPA..."
           xcodebuild -exportArchive \
                     -archivePath "$HOME/build/App.xcarchive" \
-                    -exportPath "$HOME/build/ipa" \
                     -exportOptionsPlist ExportOptions.plist \
-                    -allowProvisioningUpdates \
-                    CODE_SIGN_STYLE="Manual" \
-                    CODE_SIGN_IDENTITY="iPhone Distribution" \
-                    PROVISIONING_PROFILE_SPECIFIER="$PROFILE_NAME" \
-                    OTHER_CODE_SIGN_FLAGS="--keychain build.keychain" || {
-                      echo "❌ Export failed."
-                      exit 1
-                    }
+                    -exportPath "$HOME/build/ipa" \
+                    -allowProvisioningUpdates
 
     artifacts:
       - $HOME/build/ipa/*.ipa
