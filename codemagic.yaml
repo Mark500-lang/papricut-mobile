@@ -31,35 +31,51 @@ workflows:
           echo "=== CLEANING ENVIRONMENT ==="
           rm -rf node_modules package-lock.json .angular/cache ~/.npm
           npm cache clean --force
-          
-          # Use corepack for consistent package manager
-          corepack enable
-          corepack prepare yarn@stable --activate
-          
-          # Install with yarn (more reliable dependency resolution)
-          yarn install --ignore-engines --network-timeout 600000
 
-      - name: Verify Critical Dependencies
-        script: |
-          echo "=== VERIFYING DEPENDENCIES ==="
-          yarn list @angular-devkit/build-angular @ionic/angular-toolkit @ionic/storage
+          # Install exact versions of critical packages first
+          echo "=== INSTALLING CORE DEPENDENCIES ==="
+          npm install @angular/cli@17.3.17 \
+                    @angular-devkit/build-angular@17.3.17 \
+                    @ionic/angular-toolkit@9.0.0 \
+                    @ionic/storage@4.0.0 \
+                    @ionic/storage-angular@4.0.0 \
+                    --legacy-peer-deps --no-audit --force
+
+          # Install remaining packages
+          echo "=== INSTALLING REMAINING DEPENDENCIES ==="
+          npm install --legacy-peer-deps --no-audit --force
+
+          # Verify installations
+          echo "=== VERIFYING INSTALLATIONS ==="
+          npm list @angular-devkit/build-angular @ionic/angular-toolkit @ionic/storage
           ng version
 
-      - name: Build Web Assets
+      - name: Build Production Assets
         script: |
-          echo "=== BUILDING WEB ASSETS ==="
+          # Clean previous builds
+          rm -rf www
+          
+          # Build with production configuration
+          echo "=== BUILDING PRODUCTION ASSETS ==="
           npm run build -- --configuration production
           
-          # Verify www directory exists
+          # Fallback if needed
           if [ ! -d "www" ]; then
-            echo "❌ www directory not created - attempting alternative build"
+            echo "=== ATTEMPTING ALTERNATIVE BUILD ==="
             ionic build --prod
           fi
 
-      - name: Capacitor Sync
+          # Verify www directory
+          if [ ! -d "www" ]; then
+            echo "❌ Build failed - www directory not created"
+            exit 1
+          fi
+
+      - name: Sync Capacitor
         script: |
           echo "=== SYNCING WITH CAPACITOR ==="
           npx cap sync ios
+          npx cap copy ios
       - name: Build Production Assets (Robust)
         script: |
           npm cache verify

@@ -73,19 +73,5 @@
     "karma-jasmine": "5.1.0",
     "karma-jasmine-html-reporter": "2.1.0",
     "typescript": "5.2.2"
-  },
-  "overrides": {
-    "rimraf": "5.0.5",
-    "glob": "10.3.10",
-    "@xmldom/xmldom": "0.8.10",
-    "inflight": "1.0.7",
-    "eslint": "8.57.1"
-  },
-  "resolutions": {
-    "**/rimraf": "5.0.5",
-    "**/glob": "10.3.10",
-    "**/@xmldom/xmldom": "0.8.10",
-    "**/inflight": "1.0.7",
-    "**/eslint": "8.57.1"
   }
 }
