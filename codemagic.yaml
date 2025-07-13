@@ -24,12 +24,61 @@ workflows:
           brew install jq
           npm install -g @angular/cli @ionic/cli native-run cordova-res
 
-      - name: Install Node Dependencies
+      - name: Install Dependencies
         script: |
-          npm ci --legacy-peer-deps
-          npm install --legacy-peer-deps
-          npm audit fix --force
-          npx cap update ios
+          # Clean slate
+          rm -rf node_modules package-lock.json
+          
+          # Install exact versions
+          npm install --legacy-peer-deps --no-audit
+          npm install -g @angular/cli@17.3.17 @ionic/cli@7.2.1
+          
+          # Force update critical packages
+          npx npm-force-resolutions
+          
+          # Verify installations
+          ng version
+          ionic info
+
+      - name: Build Production Assets
+        script: |
+          # Clean previous builds
+          rm -rf www
+          
+          # Build with production configuration
+          npm run build -- --configuration production
+          
+          # Verify www directory
+          if [ ! -d "www" ]; then
+            echo "❌ Build failed - www directory not created"
+            exit 1
+          fi
+          
+          # Verify critical files
+          REQUIRED_FILES=(
+            "index.html"
+            "main.js"
+            "polyfills.js"
+            "runtime.js"
+            "styles.css"
+          )
+          
+          for file in "${REQUIRED_FILES[@]}"; do
+            if [ ! -f "www/$file" ]; then
+              echo "❌ Missing required file: www/$file"
+              exit 1
+            fi
+          done
+
+      - name: Sync Capacitor
+        script: |
+          npx cap sync ios --deployment
+          
+          # Verify iOS assets
+          if [ ! -d "ios/App/App/public" ] && [ ! -d "ios/App/App/www" ]; then
+            echo "❌ Capacitor sync failed - no web assets in iOS project"
+            exit 1
+          fi
 
       - name: Clean Build Environment
         script: |
