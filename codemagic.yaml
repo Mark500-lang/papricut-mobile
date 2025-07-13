@@ -33,9 +33,29 @@ workflows:
 
       - name: Build Ionic project
         script: |
-          ionic build --prod
-          npx cap sync ios
-          npx cap update ios
+          # Clean previous builds
+          rm -rf www
+          
+          # Build with verbose logging
+          ionic build --prod --verbose
+          
+          # Verify www was created
+          if [ ! -d "www" ]; then
+            echo "❌ Ionic failed to create www directory"
+            ls -la
+            exit 1
+          fi
+          
+          # Sync with additional verification
+          npx cap sync ios --verbose
+          
+          # Double-check iOS www location
+          if [ ! -d "ios/App/App/public" ]; then
+            echo "❌ Capacitor failed to copy www to iOS project"
+            ls -la ios/App/App/
+            exit 1
+          fi
+          
           cd ios/App && pod install && cd ../..
 
       - name: Decode signing certificate and provisioning profile
@@ -124,6 +144,24 @@ workflows:
                     -exportOptionsPlist ExportOptions.plist \
                     -allowProvisioningUpdates | tee "$HOME/build/export_log.txt"
 
+      - name: Verify Web Assets
+        script: |
+          # Check Angular production build
+          if [ ! -f "www/index.html" ]; then
+            echo "❌ Missing index.html in www"
+            find www -type f
+            exit 1
+          fi
+          
+          # Check required JS bundles
+          REQUIRED_JS=("main" "polyfills" "runtime")
+          for js in "${REQUIRED_JS[@]}"; do
+            if ! compgen -G "www/$js*.js" > /dev/null; then
+              echo "❌ Missing $js*.js in www"
+              exit 1
+            fi
+          done
+
       - name: Validate Bundle Contents
         script: |
           echo "=== VALIDATING APP BUNDLE ==="
@@ -131,11 +169,16 @@ workflows:
           # 1. Verify www directory structure
           WWW_DIR="$HOME/build/App.xcarchive/Products/Applications/App.app/www"
           if [ ! -d "$WWW_DIR" ]; then
-            echo "❌ CRITICAL ERROR: Missing www directory"
-            exit 1
+            WWW_DIR="$HOME/build/App.xcarchive/Products/Applications/App.app/public"
+            if [ ! -d "$WWW_DIR" ]; then
+              echo "❌ CRITICAL: Missing web assets directory (tried www/ and public/)"
+              find "$HOME/build/App.xcarchive/Products/Applications/App.app" -maxdepth 1
+              exit 1
+            fi
           fi
           
-          echo "✅ www directory exists"
+          echo "✅ Found web assets at: $WWW_DIR"
+          ls -la "$WWW_DIR"
           
           # 2. Check critical web assets
           REQUIRED_WEB_FILES=(
@@ -170,7 +213,19 @@ workflows:
             fi
             echo "✅ Found $plugin"
           done
-
+      - name: Check Capacitor Config
+        script: |
+          if [ "$(jq -r '.webDir' capacitor.config.json)" != "www" ]; then
+            echo "❌ webDir not set to 'www' in capacitor.config.json"
+            exit 1
+          fi
+      - name: Verify File Permissions
+        script: |
+          if [ ! -r "www" ] || [ ! -x "www" ]; then
+            echo "❌ www directory not readable/executable"
+            ls -ld www
+            exit 1
+          fi
       - name: Verify Code Signing
         script: |
           echo "=== CODE SIGNING VERIFICATION ==="
