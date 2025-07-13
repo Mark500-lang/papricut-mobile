@@ -36,15 +36,18 @@ workflows:
           
           # Verify critical packages
           npm list @ionic/angular-toolkit @ionic/storage @angular-devkit/build-angular
+
       - name: Fallback Installation
-        if: failure()
         script: |
-          echo "=== ATTEMPTING FALLBACK INSTALLATION ==="
-          npm install @ionic/angular-toolkit@latest \
-                    @ionic/storage@latest \
-                    @angular-devkit/build-angular@latest \
-                    --save-exact --legacy-peer-deps --no-audit
-          npm install
+          if [ "$CM_PREVIOUS_STEP_STATUS" != "success" ]; then
+            echo "=== ATTEMPTING FALLBACK INSTALLATION ==="
+            npm install @ionic/angular-toolkit@latest \
+                      @ionic/storage@latest \
+                      @angular-devkit/build-angular@latest \
+                      --save-exact --legacy-peer-deps --no-audit
+            npm install
+          fi
+
       - name: Verify and Repair Dependencies
         script: |
           # Check if angular-toolkit installed correctly
