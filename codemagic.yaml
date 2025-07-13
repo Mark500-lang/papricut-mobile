@@ -126,13 +126,24 @@ workflows:
       - name: Prepare Capacitor Assets
         script: |
           echo "=== PREPARING CAPACITOR ASSETS ==="
-          # Ensure index.html points to correct hashed files
           MAIN_JS=$(find www -name "main.*.js" | head -n 1)
-          sed -i.bak "s/main.js/$(basename "$MAIN_JS")/g" www/index.html
-          
-          # Verify the modification
+          RUNTIME_JS=$(find www -name "runtime.*.js" | head -n 1)
+          STYLES_CSS=$(find www -name "styles.*.css" | head -n 1)
+          sed -i.bak "s|main.js|$(basename "$MAIN_JS")|g" www/index.html
+          sed -i.bak "s|runtime.js|$(basename "$RUNTIME_JS")|g" www/index.html
+          sed -i.bak "s|styles.css|$(basename "$STYLES_CSS")|g" www/index.html
+
+          # Verify modifications
           if ! grep -q "$(basename "$MAIN_JS")" www/index.html; then
-            echo "❌ Failed to update index.html with hashed filenames"
+            echo "❌ Failed to update index.html with hashed main.js"
+            exit 1
+          fi
+          if ! grep -q "$(basename "$RUNTIME_JS")" www/index.html; then
+            echo "❌ Failed to update index.html with hashed runtime.js"
+            exit 1
+          fi
+          if ! grep -q "$(basename "$STYLES_CSS")" www/index.html; then
+            echo "❌ Failed to update index.html with hashed styles.css"
             exit 1
           fi
       - name: Verify Angular Configuration
@@ -234,38 +245,38 @@ workflows:
       - name: Validate Bundle (Comprehensive)
         script: |
           APP_PATH="$HOME/build/App.xcarchive/Products/Applications/App.app"
-          
-          # Verify web assets
-          WEB_ASSET_PATH="$APP_PATH/www" || "$APP_PATH/public"
+          WEB_ASSET_PATH="$APP_PATH/public"
+
+          # Verify web assets directory
           if [ ! -d "$WEB_ASSET_PATH" ]; then
-            echo "❌ Web assets missing from app bundle"
+            echo "❌ Web assets missing from $WEB_ASSET_PATH"
             echo "App bundle contents:"
             find "$APP_PATH" -maxdepth 2
             exit 1
           fi
-          
-          # Verify critical web files
+
+          # Verify critical web files with hashed patterns
           WEB_FILES=(
             "index.html"
-            "main.js"
-            "runtime.js"
-            "styles.css"
+            "main.*.js"
+            "runtime.*.js"
+            "styles.*.css"
           )
-          
-          for file in "${WEB_FILES[@]}"; do
-            if [ ! -f "$WEB_ASSET_PATH/$file" ]; then
-              echo "❌ Missing web file: $WEB_ASSET_PATH/$file"
+
+          for pattern in "${WEB_FILES[@]}"; do
+            if ! compgen -G "$WEB_ASSET_PATH/$pattern" > /dev/null; then
+              echo "❌ Missing web file pattern: $WEB_ASSET_PATH/$pattern"
               exit 1
             fi
           done
-          
+
           # Verify native plugins
           REQUIRED_PLUGINS=(
             "Capacitor.framework"
             "CapacitorCordova.framework"
             "CapacitorCamera.framework"
           )
-          
+
           for plugin in "${REQUIRED_PLUGINS[@]}"; do
             if [ ! -d "$APP_PATH/Frameworks/$plugin" ]; then
               echo "❌ Missing plugin framework: $plugin"
@@ -274,7 +285,7 @@ workflows:
               exit 1
             fi
           done
-          
+
           # Verify splash screen
           if [ ! -f "$APP_PATH/Base.lproj/LaunchScreen.storyboardc" ]; then
             echo "❌ Missing compiled splash screen"
