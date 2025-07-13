@@ -10,26 +10,26 @@ const config: CapacitorConfig = {
     iosScheme: 'https',
     allowNavigation: [
       'account.papricut.com',
-      'api.papricut.com', // Add API subdomain
-      'cdn.papricut.com'  // Add CDN if used
+      'api.papricut.com',
+      'cdn.papricut.com'
     ],
-    cleartext: false // Force HTTPS
+    cleartext: false
   },
   ios: {
     limitsNavigationsToAppBoundDomains: true,
     scheme: 'App',
     backgroundColor: '#d1388b',
-    contentInset: 'automatic', // Better safe area handling
-    cordovaLinkerFlags: ['-ObjC'] // Required for some plugins
+    contentInset: 'automatic',
+    cordovaLinkerFlags: ['-ObjC']
   },
   android: {
     allowMixedContent: false,
     backgroundColor: '#d1388b',
-    webContentsDebuggingEnabled: false // Disable in production
+    webContentsDebuggingEnabled: false
   },
   plugins: {
     SplashScreen: {
-      launchShowDuration: 2500, // Reduced for better UX
+      launchShowDuration: 0, // Immediate hide for faster navigation
       launchAutoHide: true,
       backgroundColor: '#d1388b',
       splashFullScreen: true,
@@ -38,12 +38,12 @@ const config: CapacitorConfig = {
       androidScaleType: 'CENTER_CROP',
       iosSpinnerStyle: 'large',
       spinnerColor: '#ffffff',
-      showSpinner: true,
-      layoutName: 'launch_screen', // Explicit layout reference
+      showSpinner: false, // Disable spinner for cleaner UX
+      layoutName: 'launch_screen',
       useDialog: false
     },
     CapacitorHttp: {
-      enabled: true // Enable native HTTP if used
+      enabled: true
     }
   }
 };

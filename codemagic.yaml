@@ -24,31 +24,22 @@ workflows:
         script: |
           brew install jq
           npm install -g @angular/cli@17.3.17 @ionic/cli@7.2.1 native-run cordova-res
+          npm install @capacitor/core@5.7.8 @capacitor/ios@5.7.8 @capacitor/camera@5.0.10
 
       - name: Clean Install Dependencies
         script: |
-          # Clean environment completely
           echo "=== CLEANING ENVIRONMENT ==="
-          rm -rf node_modules package-lock.json .angular/cache ~/.npm
+          rm -rf node_modules .angular/cache ~/.npm
           npm cache clean --force
-
-          # Install exact versions of critical packages first
-          echo "=== INSTALLING CORE DEPENDENCIES ==="
-          npm install @angular/cli@17.3.17 \
-                    @angular-devkit/build-angular@17.3.17 \
-                    @ionic/angular-toolkit@9.0.0 \
-                    @ionic/storage@4.0.0 \
-                    @ionic/storage-angular@4.0.0 \
-                    --legacy-peer-deps --no-audit --force
-
-          # Install remaining packages
-          echo "=== INSTALLING REMAINING DEPENDENCIES ==="
-          npm install --legacy-peer-deps --no-audit --force
-
-          # Verify installations
+          echo "=== INSTALLING DEPENDENCIES ==="
+          npm ci --no-audit
           echo "=== VERIFYING INSTALLATIONS ==="
-          npm list @angular-devkit/build-angular @ionic/angular-toolkit @ionic/storage
+          npm list @angular-devkit/build-angular @ionic/angular-toolkit @ionic/storage @capacitor/core @capacitor/ios @capacitor/camera
           ng version
+          if [ ! -d "node_modules/@angular-devkit/build-angular" ]; then
+            echo "❌ CRITICAL: Angular build tools missing!"
+            exit 1
+          fi
 
       - name: Build Production Assets
         script: |
@@ -157,20 +148,47 @@ workflows:
 
       - name: Sync Capacitor (Robust)
         script: |
+          echo "=== CLEANING PODS ==="
+          rm -rf ios/App/Pods ios/App/Podfile.lock
+          pod cache clean --all --project-directory=ios/App
+
           echo "=== SYNCING WEB ASSETS TO IOS ==="
-          npx cap sync ios --deployment
-          npx cap copy ios
-          
-          # Verify iOS assets with multiple checks
-          if [ ! -d "ios/App/App/public" ] && [ ! -d "ios/App/App/www" ]; then
-            echo "❌ Capacitor sync failed - checking alternative locations..."
+          npx cap sync ios --verbose
+          npx cap copy ios --verbose
+
+          # Verify web assets
+          if [ ! -d "ios/App/App/public" ]; then
+            echo "❌ Capacitor sync failed - public directory missing"
             find ios/App/App -name "index.html" || echo "No web assets found"
             exit 1
           fi
-          
+
+          # Verify Podfile and frameworks
+          if [ ! -f "ios/App/Podfile" ]; then
+            echo "❌ Podfile missing"
+            exit 1
+          fi
+          pod install --project-directory=ios/App --verbose
+
+          # Verify frameworks in Xcode project
+          FRAMEWORK_PATH="ios/App/App/Frameworks"
+          if [ ! -d "$FRAMEWORK_PATH/Capacitor.framework" ]; then
+            echo "❌ Capacitor.framework missing in Xcode project"
+            find ios/App -name "*.framework" || echo "No frameworks found"
+            exit 1
+          fi
+          if [ ! -d "$FRAMEWORK_PATH/CapacitorCordova.framework" ]; then
+            echo "❌ CapacitorCordova.framework missing in Xcode project"
+            exit 1
+          fi
+          if [ ! -d "$FRAMEWORK_PATH/CapacitorCamera.framework" ]; then
+            echo "❌ CapacitorCamera.framework missing in Xcode project"
+            exit 1
+          fi
+
           echo "=== GENERATING NATIVE ASSETS ==="
           cordova-res ios --skip-config --copy
-          npx cap sync ios
+          npx cap sync ios --verbose
 
       - name: Clean Build Environment
         script: |
@@ -216,7 +234,6 @@ workflows:
       - name: Build IPA (Robust)
         script: |
           export NSUnbufferedIO=YES
-          
           echo "=== ARCHIVING APP ==="
           xcodebuild -workspace "$XCODE_WORKSPACE" \
                     -scheme "$XCODE_SCHEME" \
@@ -233,21 +250,21 @@ workflows:
                     OTHER_CODE_SIGN_FLAGS="--keychain build.keychain" \
                     ENABLE_BITCODE=NO \
                     BUILD_LIBRARY_FOR_DISTRIBUTION=YES \
+                    EMBEDDED_CONTENT_CONTAINS_SWIFT=YES \
+                    ALWAYS_EMBED_SWIFT_STANDARD_LIBRARIES=YES \
                     archive | tee "$HOME/build/archive_log.txt"
-
           echo "=== EXPORTING IPA ==="
           xcodebuild -exportArchive \
                     -archivePath "$HOME/build/App.xcarchive" \
                     -exportPath "$HOME/build/ipa" \
                     -exportOptionsPlist ExportOptions.plist \
                     -allowProvisioningUpdates | tee "$HOME/build/export_log.txt"
-
       - name: Validate Bundle (Comprehensive)
         script: |
           APP_PATH="$HOME/build/App.xcarchive/Products/Applications/App.app"
           WEB_ASSET_PATH="$APP_PATH/public"
 
-          # Verify web assets directory
+          # Verify web assets
           if [ ! -d "$WEB_ASSET_PATH" ]; then
             echo "❌ Web assets missing from $WEB_ASSET_PATH"
             echo "App bundle contents:"
@@ -255,14 +272,8 @@ workflows:
             exit 1
           fi
 
-          # Verify critical web files with hashed patterns
-          WEB_FILES=(
-            "index.html"
-            "main.*.js"
-            "runtime.*.js"
-            "styles.*.css"
-          )
-
+          # Verify critical web files
+          WEB_FILES=("index.html" "main.*.js" "runtime.*.js" "styles.*.css" "polyfills.*.js")
           for pattern in "${WEB_FILES[@]}"; do
             if ! compgen -G "$WEB_ASSET_PATH/$pattern" > /dev/null; then
               echo "❌ Missing web file pattern: $WEB_ASSET_PATH/$pattern"
@@ -270,18 +281,19 @@ workflows:
             fi
           done
 
-          # Verify native plugins
-          REQUIRED_PLUGINS=(
-            "Capacitor.framework"
-            "CapacitorCordova.framework"
-            "CapacitorCamera.framework"
-          )
-
+          # Verify frameworks
+          FRAMEWORK_PATH="$APP_PATH/Frameworks"
+          REQUIRED_PLUGINS=("Capacitor.framework" "CapacitorCordova.framework" "CapacitorCamera.framework")
+          if [ ! -d "$FRAMEWORK_PATH" ]; then
+            echo "❌ Frameworks directory missing in app bundle"
+            echo "Bundle contents:"
+            find "$APP_PATH" -maxdepth 2
+            exit 1
+          fi
           for plugin in "${REQUIRED_PLUGINS[@]}"; do
-            if [ ! -d "$APP_PATH/Frameworks/$plugin" ]; then
+            if [ ! -d "$FRAMEWORK_PATH/$plugin" ]; then
               echo "❌ Missing plugin framework: $plugin"
-              echo "Existing frameworks:"
-              ls -la "$APP_PATH/Frameworks/"
+              ls -la "$FRAMEWORK_PATH" || echo "No frameworks found"
               exit 1
             fi
           done
@@ -294,6 +306,7 @@ workflows:
             exit 1
           fi
 
+          echo "✅ Bundle validated successfully"
       - name: Final Verification
         script: |
           echo "=== FINAL BUILD VALIDATION ==="
