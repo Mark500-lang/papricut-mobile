@@ -10,7 +10,7 @@ workflows:
         BUNDLE_ID: "papricut.app.mobile"
         TEAM_ID: "H9A4H444G4"
         PROFILE_NAME: "Papricut_AppStore_2025"
-        APP_STORE_CONNECT_KEY_ID: $APP_STORE_CONNECT_KEY_ID 
+        APP_STORE_CONNECT_KEY_ID: $APP_STORE_CONNECT_KEY_ID
         APP_STORE_CONNECT_ISSUER_ID: $APP_STORE_CONNECT_ISSUER_ID
         APP_STORE_CONNECT_PRIVATE_KEY: $APP_STORE_CONNECT_PRIVATE_KEY
         NODE_OPTIONS: "--max-old-space-size=4096"
@@ -24,7 +24,7 @@ workflows:
         script: |
           brew install jq
           npm install -g @angular/cli@17.3.17 @ionic/cli@7.2.1 native-run cordova-res
-          npm install @capacitor/core@5.7.8 @capacitor/ios@5.7.8 @capacitor/camera@5.0.10
+          npm install @capacitor/core@5.7.8 @capacitor/ios@5.7.8 @capacitor/camera@5.0.10 @capacitor/splash-screen@5.0.8 @capacitor/status-bar@5.0.8 @capacitor/app@5.0.8 @capacitor/network@5.0.8 @capacitor/browser@5.2.1 @capacitor/device@5.0.8 @capacitor/filesystem@5.2.1 @capacitor/haptics@5.0.7 @capacitor/keyboard@5.0.8 @capacitor/push-notifications@5.1.2
 
       - name: Clean Install Dependencies
         script: |
@@ -34,70 +34,32 @@ workflows:
           echo "=== INSTALLING DEPENDENCIES ==="
           npm ci --no-audit
           echo "=== VERIFYING INSTALLATIONS ==="
-          npm list @angular-devkit/build-angular @ionic/angular-toolkit @ionic/storage @capacitor/core @capacitor/ios @capacitor/camera
+          npm list @angular-devkit/build-angular @ionic/angular-toolkit @ionic/storage @capacitor/core @capacitor/ios @capacitor/camera @capacitor/splash-screen @capacitor/status-bar @capacitor/app @capacitor/network @capacitor/browser @capacitor/device @capacitor/filesystem @capacitor/haptics @capacitor/keyboard @capacitor/push-notifications
           ng version
           if [ ! -d "node_modules/@angular-devkit/build-angular" ]; then
             echo "❌ CRITICAL: Angular build tools missing!"
             exit 1
           fi
-
-      - name: Build Production Assets
-        script: |
-          # Clean previous builds
-          rm -rf www
-          
-          # Build with production configuration
-          echo "=== BUILDING PRODUCTION ASSETS ==="
-          npm run build -- --configuration production
-          
-          # Fallback if needed
-          if [ ! -d "www" ]; then
-            echo "=== ATTEMPTING ALTERNATIVE BUILD ==="
-            ionic build --prod
-          fi
-
-          # Verify www directory
-          if [ ! -d "www" ]; then
-            echo "❌ Build failed - www directory not created"
+          if [ ! -d "node_modules/@capacitor/ios" ]; then
+            echo "❌ CRITICAL: Capacitor iOS missing!"
             exit 1
           fi
 
-      - name: Sync Capacitor
-        script: |
-          echo "=== SYNCING WITH CAPACITOR ==="
-          npx cap sync ios
-          npx cap copy ios
       - name: Build Production Assets (Robust)
         script: |
-          # Clean previous builds
+          echo "=== CLEANING PREVIOUS BUILDS ==="
           rm -rf www
-          
-          # Build with production configuration
           echo "=== BUILDING PRODUCTION ASSETS ==="
           npm run build -- --configuration production
-          
-          # Fallback if needed
           if [ ! -d "www" ]; then
             echo "=== ATTEMPTING ALTERNATIVE BUILD ==="
             ionic build --prod
           fi
-
-          # Verify www directory exists
           if [ ! -d "www" ]; then
             echo "❌ Build failed - www directory not created"
             exit 1
           fi
-
-          # Verify critical files exist (using hashed filename patterns)
-          REQUIRED_PATTERNS=(
-            "index.html"
-            "main.*.js"
-            "polyfills.*.js"
-            "runtime.*.js"
-            "styles.*.css"
-            "assets/"
-          )
-
+          REQUIRED_PATTERNS=("index.html" "main.*.js" "polyfills.*.js" "runtime.*.js" "styles.*.css" "assets/")
           MISSING_FILES=0
           for pattern in "${REQUIRED_PATTERNS[@]}"; do
             if ! compgen -G "www/$pattern" > /dev/null; then
@@ -105,17 +67,11 @@ workflows:
               MISSING_FILES=$((MISSING_FILES+1))
             fi
           done
-
           if [ $MISSING_FILES -gt 0 ]; then
             echo "=== BUILD OUTPUT CONTENTS ==="
             ls -la www/
-            echo "❌ Critical files missing - build failed"
             exit 1
           fi
-
-          echo "✅ All required assets verified successfully"
-      - name: Prepare Capacitor Assets
-        script: |
           echo "=== PREPARING CAPACITOR ASSETS ==="
           MAIN_JS=$(find www -name "main.*.js" | head -n 1)
           RUNTIME_JS=$(find www -name "runtime.*.js" | head -n 1)
@@ -123,8 +79,6 @@ workflows:
           sed -i.bak "s|main.js|$(basename "$MAIN_JS")|g" www/index.html
           sed -i.bak "s|runtime.js|$(basename "$RUNTIME_JS")|g" www/index.html
           sed -i.bak "s|styles.css|$(basename "$STYLES_CSS")|g" www/index.html
-
-          # Verify modifications
           if ! grep -q "$(basename "$MAIN_JS")" www/index.html; then
             echo "❌ Failed to update index.html with hashed main.js"
             exit 1
@@ -137,58 +91,72 @@ workflows:
             echo "❌ Failed to update index.html with hashed styles.css"
             exit 1
           fi
-      - name: Verify Angular Configuration
+
+      - name: Configure Podfile
         script: |
-          if ! jq -e '.projects.app.architect.build.configurations.production' angular.json >/dev/null; then
-            echo "❌ Missing production build config in angular.json"
-            echo "Current configurations:"
-            jq '.projects.app.architect.build.configurations' angular.json
-            exit 1
-          fi
+          echo "source 'https://cdn.cocoapods.org/'" > ios/App/Podfile
+          echo "platform :ios, '13.0'" >> ios/App/Podfile
+          echo "use_frameworks!" >> ios/App/Podfile
+          echo "" >> ios/App/Podfile
+          echo "target 'App' do" >> ios/App/Podfile
+          echo "  capacitor_pods" >> ios/App/Podfile
+          echo "  pod 'Capacitor', :path => '../../node_modules/@capacitor/ios'" >> ios/App/Podfile
+          echo "  pod 'CapacitorCordova', :path => '../../node_modules/@capacitor/ios'" >> ios/App/Podfile
+          echo "  pod 'CapacitorCamera', :path => '../../node_modules/@capacitor/camera'" >> ios/App/Podfile
+          echo "  pod 'CapacitorApp', :path => '../../node_modules/@capacitor/app'" >> ios/App/Podfile
+          echo "  pod 'CapacitorBrowser', :path => '../../node_modules/@capacitor/browser'" >> ios/App/Podfile
+          echo "  pod 'CapacitorDevice', :path => '../../node_modules/@capacitor/device'" >> ios/App/Podfile
+          echo "  pod 'CapacitorFilesystem', :path => '../../node_modules/@capacitor/filesystem'" >> ios/App/Podfile
+          echo "  pod 'CapacitorHaptics', :path => '../../node_modules/@capacitor/haptics'" >> ios/App/Podfile
+          echo "  pod 'CapacitorKeyboard', :path => '../../node_modules/@capacitor/keyboard'" >> ios/App/Podfile
+          echo "  pod 'CapacitorNetwork', :path => '../../node_modules/@capacitor/network'" >> ios/App/Podfile
+          echo "  pod 'CapacitorPushNotifications', :path => '../../node_modules/@capacitor/push-notifications'" >> ios/App/Podfile
+          echo "  pod 'CapacitorSplashScreen', :path => '../../node_modules/@capacitor/splash-screen'" >> ios/App/Podfile
+          echo "  pod 'CapacitorStatusBar', :path => '../../node_modules/@capacitor/status-bar'" >> ios/App/Podfile
+          echo "end" >> ios/App/Podfile
+          pod install --project-directory=ios/App
 
       - name: Sync Capacitor (Robust)
         script: |
           echo "=== CLEANING PODS ==="
           rm -rf ios/App/Pods ios/App/Podfile.lock
-          pod cache clean --all --project-directory=ios/App
-
+          pod cache clean --all
           echo "=== SYNCING WEB ASSETS TO IOS ==="
-          npx cap sync ios --verbose
-          npx cap copy ios --verbose
-
-          # Verify web assets
+          npx cap sync ios
+          npx cap copy ios
           if [ ! -d "ios/App/App/public" ]; then
             echo "❌ Capacitor sync failed - public directory missing"
             find ios/App/App -name "index.html" || echo "No web assets found"
             exit 1
           fi
-
-          # Verify Podfile and frameworks
-          if [ ! -f "ios/App/Podfile" ]; then
-            echo "❌ Podfile missing"
-            exit 1
-          fi
-          pod install --project-directory=ios/App --verbose
-
-          # Verify frameworks in Xcode project
           FRAMEWORK_PATH="ios/App/App/Frameworks"
-          if [ ! -d "$FRAMEWORK_PATH/Capacitor.framework" ]; then
-            echo "❌ Capacitor.framework missing in Xcode project"
-            find ios/App -name "*.framework" || echo "No frameworks found"
-            exit 1
-          fi
-          if [ ! -d "$FRAMEWORK_PATH/CapacitorCordova.framework" ]; then
-            echo "❌ CapacitorCordova.framework missing in Xcode project"
-            exit 1
-          fi
-          if [ ! -d "$FRAMEWORK_PATH/CapacitorCamera.framework" ]; then
-            echo "❌ CapacitorCamera.framework missing in Xcode project"
-            exit 1
-          fi
-
+          REQUIRED_PLUGINS=("Capacitor.framework" "CapacitorCordova.framework" "CapacitorCamera.framework" "CapacitorApp.framework" "CapacitorBrowser.framework" "CapacitorDevice.framework" "CapacitorFilesystem.framework" "CapacitorHaptics.framework" "CapacitorKeyboard.framework" "CapacitorNetwork.framework" "CapacitorPushNotifications.framework" "CapacitorSplashScreen.framework" "CapacitorStatusBar.framework")
+          for plugin in "${REQUIRED_PLUGINS[@]}"; do
+            if [ ! -d "$FRAMEWORK_PATH/$plugin" ]; then
+              echo "❌ $plugin missing in Xcode project"
+              find ios/App -name "*.framework" || echo "No frameworks found"
+              exit 1
+            fi
+          done
           echo "=== GENERATING NATIVE ASSETS ==="
           cordova-res ios --skip-config --copy
-          npx cap sync ios --verbose
+          npx cap sync ios
+
+      - name: Update Info.plist
+        script: |
+          PLIST_PATH="ios/App/App/Info.plist"
+          /usr/libexec/PlistBuddy -c "Set :UILaunchStoryboardName LaunchScreen" "$PLIST_PATH"
+          /usr/libexec/PlistBuddy -c "Set :UISupportedInterfaceOrientations:0 UIInterfaceOrientationPortrait" "$PLIST_PATH"
+          /usr/libexec/PlistBuddy -c "Add :NSAppTransportSecurity:NSExceptionDomains:api.papricut.com dict" "$PLIST_PATH" || true
+          /usr/libexec/PlistBuddy -c "Set :NSAppTransportSecurity:NSExceptionDomains:api.papricut.com:NSIncludesSubdomains bool true" "$PLIST_PATH"
+          /usr/libexec/PlistBuddy -c "Set :NSAppTransportSecurity:NSExceptionDomains:api.papricut.com:NSExceptionAllowsInsecureHTTPLoads bool false" "$PLIST_PATH"
+          /usr/libexec/PlistBuddy -c "Set :NSAppTransportSecurity:NSExceptionDomains:api.papricut.com:NSExceptionRequiresForwardSecrecy bool true" "$PLIST_PATH"
+          /usr/libexec/PlistBuddy -c "Set :NSAppTransportSecurity:NSExceptionDomains:api.papricut.com:NSExceptionMinimumTLSVersion string TLSv1.2" "$PLIST_PATH"
+          /usr/libexec/PlistBuddy -c "Add :NSAppTransportSecurity:NSExceptionDomains:cdn.papricut.com dict" "$PLIST_PATH" || true
+          /usr/libexec/PlistBuddy -c "Set :NSAppTransportSecurity:NSExceptionDomains:cdn.papricut.com:NSIncludesSubdomains bool true" "$PLIST_PATH"
+          /usr/libexec/PlistBuddy -c "Set :NSAppTransportSecurity:NSExceptionDomains:cdn.papricut.com:NSExceptionAllowsInsecureHTTPLoads bool false" "$PLIST_PATH"
+          /usr/libexec/PlistBuddy -c "Set :NSAppTransportSecurity:NSExceptionDomains:cdn.papricut.com:NSExceptionRequiresForwardSecrecy bool true" "$PLIST_PATH"
+          /usr/libexec/PlistBuddy -c "Set :NSAppTransportSecurity:NSExceptionDomains:cdn.papricut.com:NSExceptionMinimumTLSVersion string TLSv1.2" "$PLIST_PATH"
 
       - name: Clean Build Environment
         script: |
@@ -219,7 +187,6 @@ workflows:
 
       - name: Configure Pods Project
         script: |
-          # Disable code signing for Pods
           /usr/libexec/PlistBuddy -c "Add :objects:13D8C11F2543F3D900D83B1E:buildSettings:CODE_SIGNING_ALLOWED string NO" ios/App/Pods/Pods.xcodeproj/project.pbxproj
           /usr/libexec/PlistBuddy -c "Add :objects:13D8C11F2543F3D900D83B1E:buildSettings:CODE_SIGNING_REQUIRED string NO" ios/App/Pods/Pods.xcodeproj/project.pbxproj
 
@@ -236,43 +203,41 @@ workflows:
           export NSUnbufferedIO=YES
           echo "=== ARCHIVING APP ==="
           xcodebuild -workspace "$XCODE_WORKSPACE" \
-                    -scheme "$XCODE_SCHEME" \
-                    -sdk iphoneos \
-                    -configuration Release \
-                    -archivePath "$HOME/build/App.xcarchive" \
-                    -allowProvisioningUpdates \
-                    -destination 'generic/platform=iOS' \
-                    DEVELOPMENT_TEAM="$TEAM_ID" \
-                    PRODUCT_BUNDLE_IDENTIFIER="$BUNDLE_ID" \
-                    CODE_SIGN_STYLE="Manual" \
-                    CODE_SIGN_IDENTITY="iPhone Distribution" \
-                    PROVISIONING_PROFILE="$PROFILE_UUID" \
-                    OTHER_CODE_SIGN_FLAGS="--keychain build.keychain" \
-                    ENABLE_BITCODE=NO \
-                    BUILD_LIBRARY_FOR_DISTRIBUTION=YES \
-                    EMBEDDED_CONTENT_CONTAINS_SWIFT=YES \
-                    ALWAYS_EMBED_SWIFT_STANDARD_LIBRARIES=YES \
-                    archive | tee "$HOME/build/archive_log.txt"
+                     -scheme "$XCODE_SCHEME" \
+                     -sdk iphoneos \
+                     -configuration Release \
+                     -archivePath "$HOME/build/App.xcarchive" \
+                     -allowProvisioningUpdates \
+                     -destination 'generic/platform=iOS' \
+                     DEVELOPMENT_TEAM="$TEAM_ID" \
+                     PRODUCT_BUNDLE_IDENTIFIER="$BUNDLE_ID" \
+                     CODE_SIGN_STYLE="Manual" \
+                     CODE_SIGN_IDENTITY="iPhone Distribution" \
+                     PROVISIONING_PROFILE="$PROFILE_UUID" \
+                     OTHER_CODE_SIGN_FLAGS="--keychain build.keychain" \
+                     ENABLE_BITCODE=NO \
+                     BUILD_LIBRARY_FOR_DISTRIBUTION=YES \
+                     EMBEDDED_CONTENT_CONTAINS_SWIFT=YES \
+                     ALWAYS_EMBED_SWIFT_STANDARD_LIBRARIES=YES \
+                     LD_RUNPATH_SEARCH_PATHS="@executable_path/Frameworks" \
+                     archive | tee "$HOME/build/archive_log.txt"
           echo "=== EXPORTING IPA ==="
           xcodebuild -exportArchive \
-                    -archivePath "$HOME/build/App.xcarchive" \
-                    -exportPath "$HOME/build/ipa" \
-                    -exportOptionsPlist ExportOptions.plist \
-                    -allowProvisioningUpdates | tee "$HOME/build/export_log.txt"
+                     -archivePath "$HOME/build/App.xcarchive" \
+                     -exportPath "$HOME/build/ipa" \
+                     -exportOptionsPlist ExportOptions.plist \
+                     -allowProvisioningUpdates | tee "$HOME/build/export_log.txt"
+
       - name: Validate Bundle (Comprehensive)
         script: |
           APP_PATH="$HOME/build/App.xcarchive/Products/Applications/App.app"
           WEB_ASSET_PATH="$APP_PATH/public"
-
-          # Verify web assets
           if [ ! -d "$WEB_ASSET_PATH" ]; then
             echo "❌ Web assets missing from $WEB_ASSET_PATH"
             echo "App bundle contents:"
             find "$APP_PATH" -maxdepth 2
             exit 1
           fi
-
-          # Verify critical web files
           WEB_FILES=("index.html" "main.*.js" "runtime.*.js" "styles.*.css" "polyfills.*.js")
           for pattern in "${WEB_FILES[@]}"; do
             if ! compgen -G "$WEB_ASSET_PATH/$pattern" > /dev/null; then
@@ -280,10 +245,8 @@ workflows:
               exit 1
             fi
           done
-
-          # Verify frameworks
           FRAMEWORK_PATH="$APP_PATH/Frameworks"
-          REQUIRED_PLUGINS=("Capacitor.framework" "CapacitorCordova.framework" "CapacitorCamera.framework")
+          REQUIRED_PLUGINS=("Capacitor.framework" "CapacitorCordova.framework" "CapacitorCamera.framework" "CapacitorApp.framework" "CapacitorBrowser.framework" "CapacitorDevice.framework" "CapacitorFilesystem.framework" "CapacitorHaptics.framework" "CapacitorKeyboard.framework" "CapacitorNetwork.framework" "CapacitorPushNotifications.framework" "CapacitorSplashScreen.framework" "CapacitorStatusBar.framework")
           if [ ! -d "$FRAMEWORK_PATH" ]; then
             echo "❌ Frameworks directory missing in app bundle"
             echo "Bundle contents:"
@@ -297,23 +260,21 @@ workflows:
               exit 1
             fi
           done
-
-          # Verify splash screen
           if [ ! -f "$APP_PATH/Base.lproj/LaunchScreen.storyboardc" ]; then
             echo "❌ Missing compiled splash screen"
             echo "Launch assets:"
             find "$APP_PATH" -name "*.storyboard*"
             exit 1
           fi
-
           echo "✅ Bundle validated successfully"
+
       - name: Final Verification
         script: |
           echo "=== FINAL BUILD VALIDATION ==="
           APP_PATH="$HOME/build/App.xcarchive/Products/Applications/App.app"
           echo "App Version: $(/usr/libexec/PlistBuddy -c "Print CFBundleShortVersionString" "$APP_PATH/Info.plist")"
           echo "Build Version: $(/usr/libexec/PlistBuddy -c "Print CFBundleVersion" "$APP_PATH/Info.plist")"
-          echo "Web Assets: $(find "$APP_PATH/www" -type f | wc -l) files"
+          echo "Web Assets: $(find "$APP_PATH/public" -type f | wc -l) files"
           echo "Plugin Frameworks: $(find "$APP_PATH/Frameworks" -name "*.framework" | wc -l)"
           codesign -dv --verbose=4 "$APP_PATH"
           plutil -convert xml1 "$APP_PATH/Info.plist" -o - | xmllint --format -

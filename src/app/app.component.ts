@@ -8,13 +8,11 @@ import {
   ActionSheetController,
 } from '@ionic/angular';
 import { SplashScreen } from '@capacitor/splash-screen';
-import { StatusBar } from '@capacitor/status-bar';
+import { StatusBar, StatusBarStyle } from '@capacitor/status-bar';
 import { App as CapacitorApp } from '@capacitor/app';
 import { Network } from '@capacitor/network';
 import { Storage } from '@ionic/storage';
 import { environment } from 'src/environments/environment';
-
-// Services
 import { ApiService } from './services/api.service';
 import { NetworkService } from './services/network.service';
 import { AuthService } from './services/auth.service';
@@ -45,6 +43,9 @@ export class AppComponent implements OnInit {
   async ngOnInit() {
     try {
       await this.initializeApp();
+      window.addEventListener('unhandledrejection', (event) => {
+        console.error('Webview error:', event.reason);
+      });
     } catch (error) {
       console.error('Bootstrap failed:', error);
       this.showFatalError();
@@ -52,34 +53,27 @@ export class AppComponent implements OnInit {
   }
 
   private async initializeApp() {
-    // 1. Initialize storage first
+    console.log('Initializing app...');
     await this.storage.create();
-
-    // 2. Wait for platform readiness
+    console.log('Storage initialized');
     await this.platform.ready();
-
-    // 3. Configure UI
+    console.log('Platform ready');
     await this.configureUI();
-
-    // 4. Initialize auth state
     await this.authService.initializeAuth();
-
-    // 5. Setup network monitoring
+    console.log('Auth initialized');
     this.setupNetworkListener();
-
-    // 6. Check for updates
     this.safeCheckForUpdate();
-
-    // 7. Navigate based on auth state
-    this.navigateBasedOnAuth();
+    await this.navigateBasedOnAuth();
   }
 
   private async configureUI() {
     try {
       await StatusBar.setBackgroundColor({ color: '#d1378c' });
+      await StatusBar.setStyle({ style: StatusBarStyle.Light });
       await StatusBar.setOverlaysWebView({ overlay: true });
-      await SplashScreen.hide();
-      this.setupBackButtonHandler();
+      await SplashScreen.hide()
+        .then(() => console.log('Splash screen hidden'))
+        .catch(err => console.error('Splash screen hide error:', err));
     } catch (error) {
       console.warn('UI configuration failed:', error);
     }
@@ -87,6 +81,7 @@ export class AppComponent implements OnInit {
 
   private setupBackButtonHandler() {
     CapacitorApp.addListener('backButton', ({ canGoBack }) => {
+      console.log('Back button pressed, canGoBack:', canGoBack);
       if (!canGoBack && !this.isActionSheetOpen) {
         this.presentExitConfirmation();
       } else {
@@ -103,20 +98,27 @@ export class AppComponent implements OnInit {
         {
           text: 'Exit',
           icon: 'power',
-          handler: () => CapacitorApp.exitApp()
+          handler: () => {
+            console.log('Exiting app');
+            CapacitorApp.exitApp();
+          },
         },
         {
           text: 'Cancel',
           role: 'cancel',
-          handler: () => this.isActionSheetOpen = false
-        }
-      ]
+          handler: () => {
+            this.isActionSheetOpen = false;
+            console.log('Exit cancelled');
+          },
+        },
+      ],
     });
     await actionSheet.present();
   }
 
   private setupNetworkListener() {
-    this.networkListener = Network.addListener('networkStatusChange', status => {
+    this.networkListener = Network.addListener('networkStatusChange', (status) => {
+      console.log('Network status changed:', status);
       if (!status.connected) {
         this.toast('You are offline. Some features may not work.');
       }
@@ -127,6 +129,7 @@ export class AppComponent implements OnInit {
     try {
       const isAuth = await this.authService.getIsAuthenticatedValue();
       const initialRoute = isAuth ? '/home' : '/welcome';
+      console.log('Navigating to:', initialRoute);
       await this.router.navigate([initialRoute], { replaceUrl: true });
     } catch (error) {
       console.error('Navigation failed:', error);
@@ -137,10 +140,8 @@ export class AppComponent implements OnInit {
   private async safeCheckForUpdate() {
     try {
       if (!environment.production) return;
-      
       const platform = this.platform.is('android') ? 'android' : 'ios';
       const response = await this.apiService.checkVersion(platform) as any;
-      
       if (response?.result?.code === 1) {
         await this.handleUpdateResponse(response.result);
       }
@@ -148,18 +149,19 @@ export class AppComponent implements OnInit {
       console.warn('Version check failed:', error);
     }
   }
-  
+
   private async handleUpdateResponse(updateData: any) {
     const alert = await this.alertCtrl.create({
       header: updateData.title || 'Update Available',
       message: updateData.message || 'A new version is available.',
-      buttons: updateData.force ? ['Update Now'] : ['Later', 'Update Now']
+      buttons: updateData.force ? ['Update Now'] : ['Later', 'Update Now'],
     });
 
     await alert.present();
 
     if (updateData.force) {
       alert.onDidDismiss().then(() => {
+        console.log('Opening update URL:', updateData.url);
         window.open(updateData.url, '_system');
         CapacitorApp.exitApp();
       });
@@ -173,16 +175,17 @@ export class AppComponent implements OnInit {
       buttons: [
         {
           text: 'Cancel',
-          role: 'cancel'
+          role: 'cancel',
         },
         {
           text: 'Logout',
           handler: async () => {
+            console.log('Logging out');
             await this.authService.clearAuthentication();
             this.router.navigate(['/welcome'], { replaceUrl: true });
-          }
-        }
-      ]
+          },
+        },
+      ],
     });
     await alert.present();
   }
@@ -192,11 +195,16 @@ export class AppComponent implements OnInit {
       header: 'App Error',
       message: 'A critical error occurred. Please restart the app.',
       backdropDismiss: false,
-      buttons: [{
-        text: 'Exit',
-        handler: () => CapacitorApp.exitApp()
-      }]
-    }).then(alert => alert.present());
+      buttons: [
+        {
+          text: 'Exit',
+          handler: () => {
+            console.log('Exiting due to fatal error');
+            CapacitorApp.exitApp();
+          },
+        },
+      ],
+    }).then((alert) => alert.present());
   }
 
   async toast(message: string) {
@@ -204,12 +212,13 @@ export class AppComponent implements OnInit {
       message,
       duration: 2000,
       position: 'bottom',
-      color: 'dark'
+      color: 'dark',
     });
-    toast.present();
+    await toast.present();
   }
 
   ngOnDestroy() {
+    console.log('Removing network listener');
     this.networkListener?.remove();
   }
 }
