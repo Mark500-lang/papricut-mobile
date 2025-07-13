@@ -68,7 +68,18 @@ workflows:
           # Disable code signing for all Pods targets
           /usr/libexec/PlistBuddy -c "Add :objects:13D8C11F2543F3D900D83B1E:buildSettings:CODE_SIGNING_ALLOWED string NO" ios/App/Pods/Pods.xcodeproj/project.pbxproj
           /usr/libexec/PlistBuddy -c "Add :objects:13D8C11F2543F3D900D83B1E:buildSettings:CODE_SIGNING_REQUIRED string NO" ios/App/Pods/Pods.xcodeproj/project.pbxproj
-      
+
+      - name: Force Increment Build Number
+        script: |
+          # For iOS projects
+          PLIST_PATH="ios/App/App/Info.plist"
+          CURRENT_BUILD=$(/usr/libexec/PlistBuddy -c "Print CFBundleVersion" "$PLIST_PATH")
+          NEW_BUILD=$((CURRENT_BUILD + 1))
+          /usr/libexec/PlistBuddy -c "Set CFBundleVersion $NEW_BUILD" "$PLIST_PATH"
+          
+          echo "Updated build number from $CURRENT_BUILD to $NEW_BUILD"
+          cat "$PLIST_PATH" | grep -A 1 CFBundleVersion
+
       - name: Build .ipa with xcodebuild (Manual Signing)
         script: |
           echo "📦 Archiving..."
