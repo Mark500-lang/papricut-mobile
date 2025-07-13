@@ -31,32 +31,68 @@ workflows:
           rm -rf "$HOME/build"
           mkdir -p "$HOME/build"
 
-      - name: Build Ionic project
+      - name: Build Ionic Project
         script: |
-          # Clean previous builds
-          rm -rf www
+          # 1. Clean with verification
+          echo "=== CLEANING PREVIOUS BUILDS ==="
+          rm -rf www dist node_modules/.cache
+          ls -la
           
-          # Build with verbose logging
-          ionic build --prod --verbose
+          # 2. Install with verbose output
+          echo "=== VERIFYING DEPENDENCIES ==="
+          npm ci --loglevel verbose
           
-          # Verify www was created
+          # 3. Production build with full logging
+          echo "=== STARTING PRODUCTION BUILD ==="
+          ionic build --prod \
+            --verbose \
+            -- --output-hashing=all \
+            2>&1 | tee build.log
+          
+          # 4. Verify build artifacts
+          echo "=== VERIFYING BUILD OUTPUT ==="
           if [ ! -d "www" ]; then
-            echo "❌ Ionic failed to create www directory"
+            echo "❌ Ionic build failed - www directory missing"
+            echo "=== BUILD LOG ==="
+            cat build.log
+            echo "=== FILE LIST ==="
             ls -la
+            echo "=== ANGULAR CACHE ==="
+            ls -la .angular/cache
             exit 1
           fi
           
-          # Sync with additional verification
+          # 5. Verify critical files
+          REQUIRED_FILES=(
+            "www/index.html"
+            "www/main.js"
+            "www/polyfills.js"
+            "www/styles.css"
+          )
+          for file in "${REQUIRED_FILES[@]}"; do
+            if [ ! -f "$file" ]; then
+              echo "❌ Missing required file: $file"
+              echo "=== WWW DIRECTORY CONTENTS ==="
+              find www -type f
+              exit 1
+            fi
+          done
+          
+          # 6. Sync Capacitor with validation
+          echo "=== SYNCING IOS PLATFORM ==="
           npx cap sync ios --verbose
-          
-          # Double-check iOS www location
           if [ ! -d "ios/App/App/public" ]; then
-            echo "❌ Capacitor failed to copy www to iOS project"
-            ls -la ios/App/App/
+            echo "❌ Capacitor sync failed - public directory missing"
+            echo "=== IOS APP DIRECTORY ==="
+            ls -la ios/App/App
             exit 1
           fi
           
-          cd ios/App && pod install && cd ../..
+          # 7. Install pods with checks
+          echo "=== INSTALLING COCOAPODS ==="
+          cd ios/App
+          pod install --repo-update --verbose
+          cd ../..
 
       - name: Decode signing certificate and provisioning profile
         script: |
