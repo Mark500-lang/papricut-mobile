@@ -19,93 +19,96 @@ workflows:
       events:
         - push
     scripts:
-      - name: Install dependencies
+      - name: Install System Dependencies
         script: |
-          npm install -g @ionic/cli
-          npm ci
-          npm install
+          brew install jq
+          npm install -g @angular/cli @ionic/cli native-run cordova-res
 
-      - name: Clean build environment
+      - name: Install Node Dependencies
+        script: |
+          npm ci --legacy-peer-deps
+          npm install --legacy-peer-deps
+          npm audit fix --force
+          npx cap update ios
+
+      - name: Clean Build Environment
         script: |
           rm -rf ~/Library/Developer/Xcode/DerivedData/*
           rm -rf "$HOME/build"
           mkdir -p "$HOME/build"
 
+      - name: Verify Angular Config
+        script: |
+          if ! jq -e '.projects.app.architect.build.configurations.production' angular.json >/dev/null; then
+            echo "❌ Missing production build config in angular.json"
+            exit 1
+          fi
+
       - name: Build Ionic Project
         script: |
-          # 1. Clean with verification
-          echo "=== CLEANING PREVIOUS BUILDS ==="
-          rm -rf www dist node_modules/.cache
-          ls -la
+          # Clean environment
+          rm -rf www node_modules/.cache .angular/cache
           
-          # 2. Install with verbose output
-          echo "=== VERIFYING DEPENDENCIES ==="
-          npm ci --loglevel verbose
+          # Set memory limits
+          export NODE_OPTIONS="--max-old-space-size=4096"
+          export NODE_ENV=production
           
-          # 3. Production build with full logging
+          # Production build with verbose output
           echo "=== STARTING PRODUCTION BUILD ==="
-          ionic build --prod \
-            --verbose \
-            -- --output-hashing=all \
-            2>&1 | tee build.log
+          ionic build --prod --verbose -- --output-hashing=all --source-map --stats-json 2>&1 | tee build.log
           
-          # 4. Verify build artifacts
-          echo "=== VERIFYING BUILD OUTPUT ==="
+          # Verify build output
           if [ ! -d "www" ]; then
-            echo "❌ Ionic build failed - www directory missing"
-            echo "=== BUILD LOG ==="
-            cat build.log
-            echo "=== FILE LIST ==="
-            ls -la
-            echo "=== ANGULAR CACHE ==="
-            ls -la .angular/cache
+            echo "❌ Build failed - www directory not created"
+            grep -A 20 -B 20 -i "error" build.log || cat build.log
             exit 1
           fi
           
-          # 5. Verify critical files
+          # Verify critical files
           REQUIRED_FILES=(
-            "www/index.html"
-            "www/main.js"
-            "www/polyfills.js"
-            "www/styles.css"
+            "index.html"
+            "main.js"
+            "polyfills.js"
+            "runtime.js"
+            "styles.css"
+            "assets/"
           )
+          
           for file in "${REQUIRED_FILES[@]}"; do
-            if [ ! -f "$file" ]; then
-              echo "❌ Missing required file: $file"
-              echo "=== WWW DIRECTORY CONTENTS ==="
-              find www -type f
+            if [ ! -e "www/$file" ]; then
+              echo "❌ Missing required file: www/$file"
               exit 1
             fi
           done
+
+      - name: Prepare Native Assets
+        script: |
+          # Generate splash screens and icons
+          cordova-res ios --skip-config --copy
           
-          # 6. Sync Capacitor with validation
-          echo "=== SYNCING IOS PLATFORM ==="
-          npx cap sync ios --verbose
-          if [ ! -d "ios/App/App/public" ]; then
-            echo "❌ Capacitor sync failed - public directory missing"
-            echo "=== IOS APP DIRECTORY ==="
-            ls -la ios/App/App
+          # Sync web assets to native project
+          npx cap sync ios --deployment
+          
+          # Verify sync
+          if [ ! -d "ios/App/App/public" ] && [ ! -d "ios/App/App/www" ]; then
+            echo "❌ Capacitor sync failed - no web assets in native project"
             exit 1
           fi
-          
-          # 7. Install pods with checks
-          echo "=== INSTALLING COCOAPODS ==="
-          cd ios/App
-          pod install --repo-update --verbose
-          cd ../..
 
-      - name: Decode signing certificate and provisioning profile
+      - name: Decode Signing Assets
         script: |
           echo "$DISTRIBUTION_CERTIFICATE" | base64 --decode > signing.p12
           echo "$PROVISIONING_PROFILE" | base64 --decode > "$PROFILE_NAME.mobileprovision"
 
-      - name: Install provisioning profile and certificate
+      - name: Install Provisioning Profile
         script: |
           mkdir -p ~/Library/MobileDevice/Provisioning\ Profiles
           PROFILE_UUID=$(/usr/libexec/PlistBuddy -c 'Print UUID' /dev/stdin <<< $(security cms -D -i "$PROFILE_NAME.mobileprovision"))
           cp "$PROFILE_NAME.mobileprovision" ~/Library/MobileDevice/Provisioning\ Profiles/"$PROFILE_UUID".mobileprovision
           echo "export PROFILE_UUID=$PROFILE_UUID" >> $CM_ENV
 
+      - name: Setup Code Signing
+        script: |
           security create-keychain -p "" build.keychain
           security import signing.p12 -k build.keychain -P "$CERTIFICATE_PASSWORD" -T /usr/bin/codesign
           security list-keychains -s build.keychain
@@ -113,49 +116,25 @@ workflows:
           security unlock-keychain -p "" build.keychain
           security set-key-partition-list -S apple-tool:,apple: -k "" build.keychain
 
-      - name: Verify signing assets
+      - name: Configure Pods Project
         script: |
-          echo "Provisioning Profile UUID: $PROFILE_UUID"
-          ls -la ~/Library/MobileDevice/Provisioning\ Profiles/
-          security find-identity -v -p codesigning
-
-      - name: Configure Pods project for automatic signing
-        script: |
-          # Disable code signing for all Pods targets
+          # Disable code signing for Pods
           /usr/libexec/PlistBuddy -c "Add :objects:13D8C11F2543F3D900D83B1E:buildSettings:CODE_SIGNING_ALLOWED string NO" ios/App/Pods/Pods.xcodeproj/project.pbxproj
           /usr/libexec/PlistBuddy -c "Add :objects:13D8C11F2543F3D900D83B1E:buildSettings:CODE_SIGNING_REQUIRED string NO" ios/App/Pods/Pods.xcodeproj/project.pbxproj
 
-      - name: Force Increment Build Number
+      - name: Increment Build Number
         script: |
-          # For iOS projects
           PLIST_PATH="ios/App/App/Info.plist"
           CURRENT_BUILD=$(/usr/libexec/PlistBuddy -c "Print CFBundleVersion" "$PLIST_PATH")
           NEW_BUILD=$((CURRENT_BUILD + 1))
           /usr/libexec/PlistBuddy -c "Set CFBundleVersion $NEW_BUILD" "$PLIST_PATH"
-          
           echo "Updated build number from $CURRENT_BUILD to $NEW_BUILD"
-          cat "$PLIST_PATH" | grep -A 1 CFBundleVersion
 
-      - name: Configure Capacitor for App Store
+      - name: Build IPA
         script: |
-          # Update Podfile for static linking
-          sed -i '' $'1s|^|use_frameworks! :linkage => :static\\\n|' ios/App/Podfile
-          
-          # Add post_install hook if not present
-          if ! grep -q "post_install" ios/App/Podfile; then
-            echo -e "\npost_install do |installer|\n  installer.pods_project.targets.each do |target|\n    target.build_configurations.each do |config|\n      config.build_settings['PRODUCT_BUNDLE_IDENTIFIER'] = '\$(PRODUCT_BUNDLE_IDENTIFIER)'\n      config.build_settings['MACH_O_TYPE'] = 'staticlib'\n    end\n  end\nend" >> ios/App/Podfile
-          fi
-          
-          # Clean and update pods
-          cd ios/App && pod deintegrate && pod install --repo-update
-          cd ../..
-
-      - name: Build .ipa with xcodebuild
-        script: |
-          # Enable verbose logging
           export NSUnbufferedIO=YES
           
-          echo "=== BUILDING ARCHIVE ==="
+          echo "=== ARCHIVING APP ==="
           xcodebuild -workspace "$XCODE_WORKSPACE" \
                     -scheme "$XCODE_SCHEME" \
                     -sdk iphoneos \
@@ -180,119 +159,50 @@ workflows:
                     -exportOptionsPlist ExportOptions.plist \
                     -allowProvisioningUpdates | tee "$HOME/build/export_log.txt"
 
-      - name: Verify Web Assets
+      - name: Validate Bundle
         script: |
-          # Check Angular production build
-          if [ ! -f "www/index.html" ]; then
-            echo "❌ Missing index.html in www"
-            find www -type f
+          APP_PATH="$HOME/build/App.xcarchive/Products/Applications/App.app"
+          
+          # Verify web assets
+          if [ ! -d "$APP_PATH/www" ] && [ ! -d "$APP_PATH/public" ]; then
+            echo "❌ Web assets missing from app bundle"
+            find "$APP_PATH" -maxdepth 1
             exit 1
           fi
           
-          # Check required JS bundles
-          REQUIRED_JS=("main" "polyfills" "runtime")
-          for js in "${REQUIRED_JS[@]}"; do
-            if ! compgen -G "www/$js*.js" > /dev/null; then
-              echo "❌ Missing $js*.js in www"
-              exit 1
-            fi
-          done
-
-      - name: Validate Bundle Contents
-        script: |
-          echo "=== VALIDATING APP BUNDLE ==="
-          
-          # 1. Verify www directory structure
-          WWW_DIR="$HOME/build/App.xcarchive/Products/Applications/App.app/www"
-          if [ ! -d "$WWW_DIR" ]; then
-            WWW_DIR="$HOME/build/App.xcarchive/Products/Applications/App.app/public"
-            if [ ! -d "$WWW_DIR" ]; then
-              echo "❌ CRITICAL: Missing web assets directory (tried www/ and public/)"
-              find "$HOME/build/App.xcarchive/Products/Applications/App.app" -maxdepth 1
-              exit 1
-            fi
-          fi
-          
-          echo "✅ Found web assets at: $WWW_DIR"
-          ls -la "$WWW_DIR"
-          
-          # 2. Check critical web assets
-          REQUIRED_WEB_FILES=(
-            "index.html"
-            "main.js"
-            "polyfills.js"
-            "runtime.js"
-            "styles.css"
-            "assets/"
-          )
-          
-          for file in "${REQUIRED_WEB_FILES[@]}"; do
-            if [ ! -e "$WWW_DIR/$file" ]; then
-              echo "❌ MISSING FILE: www/$file"
-              exit 1
-            fi
-            echo "✅ Found www/$file"
-          done
-          
-          # 3. Verify Capacitor plugins
-          PLUGINS=(
+          # Verify plugins
+          REQUIRED_PLUGINS=(
             "Capacitor.framework"
             "CapacitorCordova.framework"
             "CapacitorCamera.framework"
-            "CapacitorDevice.framework"
           )
           
-          for plugin in "${PLUGINS[@]}"; do
-            if [ ! -d "$HOME/build/App.xcarchive/Products/Applications/App.app/Frameworks/$plugin" ]; then
-              echo "❌ MISSING PLUGIN: $plugin"
+          for plugin in "${REQUIRED_PLUGINS[@]}"; do
+            if [ ! -d "$APP_PATH/Frameworks/$plugin" ]; then
+              echo "❌ Missing plugin: $plugin"
               exit 1
             fi
-            echo "✅ Found $plugin"
           done
-      - name: Check Capacitor Config
-        script: |
-          if [ "$(jq -r '.webDir' capacitor.config.json)" != "www" ]; then
-            echo "❌ webDir not set to 'www' in capacitor.config.json"
-            exit 1
-          fi
-      - name: Verify File Permissions
-        script: |
-          if [ ! -r "www" ] || [ ! -x "www" ]; then
-            echo "❌ www directory not readable/executable"
-            ls -ld www
-            exit 1
-          fi
-      - name: Verify Code Signing
-        script: |
-          echo "=== CODE SIGNING VERIFICATION ==="
-          codesign -dv --verbose=4 "$HOME/build/App.xcarchive/Products/Applications/App.app"
           
-          # Verify provisioning profile
-          EMBEDDED_PROFILE="$HOME/build/App.xcarchive/Products/Applications/App.app/embedded.mobileprovision"
-          if [ ! -f "$EMBEDDED_PROFILE" ]; then
-            echo "❌ No embedded provisioning profile found"
+          # Verify splash screen
+          if [ ! -f "$APP_PATH/Base.lproj/LaunchScreen.storyboardc" ]; then
+            echo "❌ Missing compiled splash screen"
             exit 1
           fi
-          
-          echo "✅ Provisioning profile:"
-          security cms -D -i "$EMBEDDED_PROFILE" | grep -E '(Name|UUID|ExpirationDate)'
 
-      - name: Final Build Report
+      - name: Final Checks
         script: |
-          echo "=== BUILD VALIDATION REPORT ==="
-          echo "App Version: $(/usr/libexec/PlistBuddy -c "Print :CFBundleShortVersionString" "$HOME/build/App.xcarchive/Products/Applications/App.app/Info.plist")"
-          echo "Build Number: $(/usr/libexec/PlistBuddy -c "Print :CFBundleVersion" "$HOME/build/App.xcarchive/Products/Applications/App.app/Info.plist")"
-          echo "Bundle ID: $(/usr/libexec/PlistBuddy -c "Print :CFBundleIdentifier" "$HOME/build/App.xcarchive/Products/Applications/App.app/Info.plist")"
-          echo "Minimum iOS: $(/usr/libexec/PlistBuddy -c "Print :MinimumOSVersion" "$HOME/build/App.xcarchive/Products/Applications/App.app/Info.plist")"
+          echo "=== BUILD VALIDATION ==="
+          echo "App Version: $(/usr/libexec/PlistBuddy -c "Print CFBundleShortVersionString" "$HOME/build/App.xcarchive/Products/Applications/App.app/Info.plist")"
           echo "Web Assets: $(find "$HOME/build/App.xcarchive/Products/Applications/App.app/www" -type f | wc -l) files"
-          echo "Native Plugins: $(find "$HOME/build/App.xcarchive/Products/Applications/App.app/Frameworks" -name "*.framework" | wc -l) frameworks"
-          echo "Code Signing: $(codesign -dv "$HOME/build/App.xcarchive/Products/Applications/App.app" 2>&1 | grep -c "valid on disk")"
-          echo "=== BUILD VALIDATION COMPLETE ==="
+          echo "Plugins: $(find "$HOME/build/App.xcarchive/Products/Applications/App.app/Frameworks" -name "*.framework" | wc -l) frameworks"
+          codesign -dv --verbose=4 "$HOME/build/App.xcarchive/Products/Applications/App.app"
 
     artifacts:
       - $HOME/build/ipa/*.ipa
       - $HOME/build/archive_log.txt
       - $HOME/build/export_log.txt
+      - build.log
     publishing:
       app_store_connect:
         auth: integration

@@ -4,37 +4,47 @@ const config: CapacitorConfig = {
   appId: 'papricut.app.mobile',
   appName: 'Papricut',
   webDir: 'www',
+  bundledWebRuntime: false, // Recommended for Angular
   server: {
     hostname: 'papricut.com',
     androidScheme: 'https',
     iosScheme: 'https',
     allowNavigation: [
-      'account.papricut.com',  // Explicit API domain
-      'papricut.com'           // Public domain
-    ]
+      'account.papricut.com',
+      'api.papricut.com', // Add API subdomain
+      'cdn.papricut.com'  // Add CDN if used
+    ],
+    cleartext: false // Force HTTPS
   },
   ios: {
     limitsNavigationsToAppBoundDomains: true,
     scheme: 'App',
-    backgroundColor: '#d1388b' // Fallback if splash plugin fails
+    backgroundColor: '#d1388b',
+    contentInset: 'automatic', // Better safe area handling
+    cordovaLinkerFlags: ['-ObjC'] // Required for some plugins
   },
   android: {
-    // Explicit Android configuration:
-    allowMixedContent: false, // Force HTTPS
-    backgroundColor: '#d1388b'
+    allowMixedContent: false,
+    backgroundColor: '#d1388b',
+    webContentsDebuggingEnabled: false // Disable in production
   },
   plugins: {
     SplashScreen: {
-      launchShowDuration: 3000, // REQUIRED for auto-hide (milliseconds)
-      launchAutoHide: true,     // Recommended for production
+      launchShowDuration: 2500, // Reduced for better UX
+      launchAutoHide: true,
       backgroundColor: '#d1388b',
       splashFullScreen: true,
       splashImmersive: true,
-      androidSplashResourceName: 'splash', // Must match actual resource name
-      androidScaleType: 'CENTER_CROP',     // Better image handling
-      iosSpinnerStyle: 'large',           // iOS loading indicator
-      spinnerColor: '#ffffff',            // Spinner color
-      showSpinner: true                   // Enable loading indicator
+      androidSplashResourceName: 'splash',
+      androidScaleType: 'CENTER_CROP',
+      iosSpinnerStyle: 'large',
+      spinnerColor: '#ffffff',
+      showSpinner: true,
+      layoutName: 'launch_screen', // Explicit layout reference
+      useDialog: false
+    },
+    CapacitorHttp: {
+      enabled: true // Enable native HTTP if used
     }
   }
 };
