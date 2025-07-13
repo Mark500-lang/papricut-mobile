@@ -27,21 +27,34 @@ workflows:
 
       - name: Clean Install Dependencies
         script: |
-          # Clean slate with forced removal
+          # Clean slate
+          echo "=== CLEANING ENVIRONMENT ==="
           rm -rf node_modules package-lock.json .angular/cache
           
-          # Install with exact versions and forced resolution
+          # Install core dependencies first
+          echo "=== INSTALLING CORE DEPENDENCIES ==="
+          npm install @angular/cli@17.3.17 @angular-devkit/build-angular@17.3.17 --save-dev --legacy-peer-deps --no-audit
+          
+          # Install remaining packages
+          echo "=== INSTALLING REMAINING DEPENDENCIES ==="
           npm install --legacy-peer-deps --no-audit --force
-          npm install @angular-devkit/build-angular@17.3.17 --save-dev --force
           
-          # Verify the critical package exists
-          ls -la node_modules/@angular-devkit/build-angular/package.json
+          npm cache clean --force
+
+          # Verify critical packages
+          echo "=== VERIFYING INSTALLATIONS ==="
+          npm list @angular-devkit/build-angular @ionic/angular-toolkit
+          ng version
+      - name: Verify and Repair Dependencies
+        script: |
+          # Check if angular-toolkit installed correctly
+          if [ ! -d "node_modules/@ionic/angular-toolkit" ]; then
+            echo "⚠️ Ionic Angular Toolkit missing - installing latest compatible version"
+            npm install @ionic/angular-toolkit@latest --save-dev --legacy-peer-deps
+          fi
           
-          # Rebuild node-sass if needed
-          npm rebuild node-sass
-          
-          # Verify installations
-          npm list @angular-devkit/build-angular @angular/cli
+          # Final verification
+          npm list @ionic/angular-toolkit @angular-devkit/build-angular || exit 1
       - name: Verify Angular Builder
         script: |
           if [ ! -d "node_modules/@angular-devkit/build-angular" ]; then
