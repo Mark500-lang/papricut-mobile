@@ -96,7 +96,10 @@ workflows:
 
       - name: Build .ipa with xcodebuild
         script: |
-          # Build archive
+          # Enable verbose logging
+          export NSUnbufferedIO=YES
+          
+          echo "=== BUILDING ARCHIVE ==="
           xcodebuild -workspace "$XCODE_WORKSPACE" \
                     -scheme "$XCODE_SCHEME" \
                     -sdk iphoneos \
@@ -112,78 +115,95 @@ workflows:
                     OTHER_CODE_SIGN_FLAGS="--keychain build.keychain" \
                     ENABLE_BITCODE=NO \
                     BUILD_LIBRARY_FOR_DISTRIBUTION=YES \
-                    archive
+                    archive | tee "$HOME/build/archive_log.txt"
 
-          # Export IPA using your existing ExportOptions.plist
+          echo "=== EXPORTING IPA ==="
           xcodebuild -exportArchive \
                     -archivePath "$HOME/build/App.xcarchive" \
                     -exportPath "$HOME/build/ipa" \
                     -exportOptionsPlist ExportOptions.plist \
-                    -allowProvisioningUpdates
-      - name: Validate App Bundle Contents
+                    -allowProvisioningUpdates | tee "$HOME/build/export_log.txt"
+
+      - name: Validate Bundle Contents
         script: |
-          # 1. Verify www assets were bundled
-          if ! unzip -l "$HOME/build/App.xcarchive/Products/Applications/App.app" | grep -q "www/index.html"; then
-            echo "❌ Error: Web assets missing from app bundle"
-            exit 1
-          fi
-
-          # 2. Check Capacitor plugins are properly embedded
-          PLUGINS_COUNT=$(find "$HOME/build/App.xcarchive/Products/Applications/App.app/Frameworks" -name "Capacitor*.framework" | wc -l)
-          if [ "$PLUGINS_COUNT" -lt 5 ]; then
-            echo "❌ Error: Missing Capacitor plugins (found $PLUGINS_COUNT)"
-            exit 1
-          fi
-
-          # 3. Verify Info.plist configuration
-          PLIST_PATH="$HOME/build/App.xcarchive/Products/Applications/App.app/Info.plist"
-          if ! /usr/libexec/PlistBuddy -c "Print :CFBundleVersion" "$PLIST_PATH"; then
-            echo "❌ Error: Invalid Info.plist"
-            exit 1
-          fi
-
-          echo "✅ All bundle validation checks passed"
-
-      - name: Simulate First Launch
-        script: |
-          # Extract IPA for inspection
-          unzip -q "$HOME/build/ipa/App.ipa" -d "$HOME/build/unpacked"
+          echo "=== VALIDATING APP BUNDLE ==="
           
-          # 1. Verify startup sequence
-          echo "=== EXPECTED STARTUP FILES ==="
-          ls -la "$HOME/build/unpacked/Payload/App.app/www"
-          ls -la "$HOME/build/unpacked/Payload/App.app/Frameworks"
+          # 1. Verify www directory structure
+          WWW_DIR="$HOME/build/App.xcarchive/Products/Applications/App.app/www"
+          if [ ! -d "$WWW_DIR" ]; then
+            echo "❌ CRITICAL ERROR: Missing www directory"
+            exit 1
+          fi
           
-          # 2. Check for critical files
-          REQUIRED_FILES=(
-            "www/index.html"
-            "www/main.js"
-            "www/assets/"
-            "Frameworks/Capacitor.framework"
-            "Frameworks/CapacitorCordova.framework"
+          echo "✅ www directory exists"
+          
+          # 2. Check critical web assets
+          REQUIRED_WEB_FILES=(
+            "index.html"
+            "main.js"
+            "polyfills.js"
+            "runtime.js"
+            "styles.css"
+            "assets/"
           )
           
-          for file in "${REQUIRED_FILES[@]}"; do
-            if [ ! -e "$HOME/build/unpacked/Payload/App.app/$file" ]; then
-              echo "❌ Missing critical file: $file"
+          for file in "${REQUIRED_WEB_FILES[@]}"; do
+            if [ ! -e "$WWW_DIR/$file" ]; then
+              echo "❌ MISSING FILE: www/$file"
               exit 1
             fi
+            echo "✅ Found www/$file"
           done
           
-          echo "✅ All runtime files verified"
-      - name: Build Completion Checklist
+          # 3. Verify Capacitor plugins
+          PLUGINS=(
+            "Capacitor.framework"
+            "CapacitorCordova.framework"
+            "CapacitorCamera.framework"
+            "CapacitorDevice.framework"
+          )
+          
+          for plugin in "${PLUGINS[@]}"; do
+            if [ ! -d "$HOME/build/App.xcarchive/Products/Applications/App.app/Frameworks/$plugin" ]; then
+              echo "❌ MISSING PLUGIN: $plugin"
+              exit 1
+            fi
+            echo "✅ Found $plugin"
+          done
+
+      - name: Verify Code Signing
         script: |
-          echo "=== BUILD VALIDATION CHECKLIST ==="
-          echo "1. Web Assets: $(ls -la "$HOME/build/unpacked/Payload/App.app/www" | wc -l) files"
-          echo "2. Plugins: $(find "$HOME/build/unpacked/Payload/App.app/Frameworks" -name "*.framework" | wc -l) frameworks"
-          echo "3. Code Signing: $(codesign -dv "$HOME/build/unpacked/Payload/App.app" 2>&1 | grep -c "valid on disk")"
-          echo "4. Bundle ID: $(/usr/libexec/PlistBuddy -c "Print :CFBundleIdentifier" "$HOME/build/unpacked/Payload/App.app/Info.plist")"
-          echo "5. Minimum OS: $(/usr/libexec/PlistBuddy -c "Print :MinimumOSVersion" "$HOME/build/unpacked/Payload/App.app/Info.plist")"
-          echo "=== BUILD SUCCESSFUL ==="
+          echo "=== CODE SIGNING VERIFICATION ==="
+          codesign -dv --verbose=4 "$HOME/build/App.xcarchive/Products/Applications/App.app"
+          
+          # Verify provisioning profile
+          EMBEDDED_PROFILE="$HOME/build/App.xcarchive/Products/Applications/App.app/embedded.mobileprovision"
+          if [ ! -f "$EMBEDDED_PROFILE" ]; then
+            echo "❌ No embedded provisioning profile found"
+            exit 1
+          fi
+          
+          echo "✅ Provisioning profile:"
+          security cms -D -i "$EMBEDDED_PROFILE" | grep -E '(Name|UUID|ExpirationDate)'
+
+      - name: Final Build Report
+        script: |
+          echo "=== BUILD VALIDATION REPORT ==="
+          echo "App Version: $(/usr/libexec/PlistBuddy -c "Print :CFBundleShortVersionString" "$HOME/build/App.xcarchive/Products/Applications/App.app/Info.plist")"
+          echo "Build Number: $(/usr/libexec/PlistBuddy -c "Print :CFBundleVersion" "$HOME/build/App.xcarchive/Products/Applications/App.app/Info.plist")"
+          echo "Bundle ID: $(/usr/libexec/PlistBuddy -c "Print :CFBundleIdentifier" "$HOME/build/App.xcarchive/Products/Applications/App.app/Info.plist")"
+          echo "Minimum iOS: $(/usr/libexec/PlistBuddy -c "Print :MinimumOSVersion" "$HOME/build/App.xcarchive/Products/Applications/App.app/Info.plist")"
+          echo "Web Assets: $(find "$HOME/build/App.xcarchive/Products/Applications/App.app/www" -type f | wc -l) files"
+          echo "Native Plugins: $(find "$HOME/build/App.xcarchive/Products/Applications/App.app/Frameworks" -name "*.framework" | wc -l) frameworks"
+          echo "Code Signing: $(codesign -dv "$HOME/build/App.xcarchive/Products/Applications/App.app" 2>&1 | grep -c "valid on disk")"
+          echo "=== BUILD VALIDATION COMPLETE ==="
+
     artifacts:
       - $HOME/build/ipa/*.ipa
+      - $HOME/build/archive_log.txt
+      - $HOME/build/export_log.txt
     publishing:
       app_store_connect:
-        auth: integration 
-        api_key: Codemagic-key  # Must match the integration name
+        auth: integration
+        api_key: Codemagic-key
         submit_to_testflight: true
