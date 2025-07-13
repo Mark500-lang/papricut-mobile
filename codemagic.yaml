@@ -27,23 +27,30 @@ workflows:
 
       - name: Clean Install Dependencies
         script: |
-          # Clean slate
+          # Clean environment completely
           echo "=== CLEANING ENVIRONMENT ==="
-          rm -rf node_modules package-lock.json .angular/cache
+          rm -rf node_modules package-lock.json .angular/cache ~/.npm
+          npm cache clean --force  # <-- ADD THIS LINE
+          npx clear-npx-cache  # <-- ADD THIS LINE
           
-          # Install core dependencies first
+          # Use supported Node.js version (Angular 17 requires 16.x or 18.x)
+          nvm install 18.18.2
+          nvm use 18.18.2
+          
+          # Install exact versions of problematic packages first
           echo "=== INSTALLING CORE DEPENDENCIES ==="
-          npm install @angular/cli@17.3.17 @angular-devkit/build-angular@17.3.17 --save-dev --legacy-peer-deps --no-audit
+          npm install @ionic/angular-toolkit@7.1.1 \
+                    @ionic/storage@4.0.1 \
+                    @angular-devkit/build-angular@17.3.17 \
+                    --save-exact --legacy-peer-deps --no-audit
           
-          # Install remaining packages
+          # Full install with forced resolution
           echo "=== INSTALLING REMAINING DEPENDENCIES ==="
           npm install --legacy-peer-deps --no-audit --force
           
-          npm cache clean --force
-
           # Verify critical packages
-          echo "=== VERIFYING INSTALLATIONS ==="
-          npm list @angular-devkit/build-angular @ionic/angular-toolkit
+          echo "=== VERIFICATION ==="
+          npm list @ionic/angular-toolkit @ionic/storage @angular-devkit/build-angular
           ng version
       - name: Verify and Repair Dependencies
         script: |
@@ -65,6 +72,7 @@ workflows:
           fi
       - name: Build Production Assets (Robust)
         script: |
+          npm cache verify
           # Clean and verify environment
           echo "=== PRE-BUILD VERIFICATION ==="
           ls -la node_modules/@angular-devkit/build-angular || echo "❌ Angular builder missing!"
