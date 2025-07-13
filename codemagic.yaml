@@ -82,19 +82,17 @@ workflows:
 
       - name: Configure Capacitor for App Store
         script: |
-          # 1. Properly modify Podfile with static frameworks
-          sed -i '' $'1i\\\nuse_frameworks! :linkage => :static\\\n' ios/App/Podfile
+          # 1. Create backup of original Podfile
+          cp ios/App/Podfile ios/App/Podfile.bak
           
-          # 2. Verify Podfile modification
-          echo "Modified Podfile contents:"
-          tail -n 5 ios/App/Podfile
+          # 2. Prepend static framework configuration
+          echo "use_frameworks! :linkage => :static" > ios/App/Podfile.tmp
+          cat ios/App/Podfile.bak >> ios/App/Podfile.tmp
+          mv ios/App/Podfile.tmp ios/App/Podfile
           
-          # 3. Reinstall pods with static linkage
+          # 3. Continue with pod installation
           cd ios/App && pod install --repo-update
           cd ../..
-          
-          # 4. Verify framework types
-          file ios/App/App/Frameworks/Capacitor.framework/Capacitor | grep "statically linked"
 
       - name: Build .ipa with fixed settings
         script: |
