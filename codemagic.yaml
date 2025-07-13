@@ -84,8 +84,10 @@ workflows:
         script: |
           echo "📦 Archiving..."
           xcodebuild -workspace "$XCODE_WORKSPACE" \
-                    -scheme "$XCODE_SCHEME" \
+                    -scheme "App" \
                     -sdk iphoneos \
+                    CURRENT_PROJECT_VERSION=1 \
+                    MARKETING_VERSION=4.3 \
                     -configuration Release \
                     -archivePath "$HOME/build/App.xcarchive" \
                     -allowProvisioningUpdates \
