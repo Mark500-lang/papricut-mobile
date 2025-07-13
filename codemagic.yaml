@@ -1,24 +1,19 @@
 workflows:
   ios-distribute:
     name: iOS Distribute (Manual Signing)
-    integrations:
-      app_store_connect: Codemagic-key
     environment:
+      node: 18.20.4
       vars:
         XCODE_WORKSPACE: "ios/App/App.xcworkspace"
         XCODE_SCHEME: "App"
         BUNDLE_ID: "papricut.app.mobile"
         TEAM_ID: "H9A4H444G4"
         PROFILE_NAME: "Papricut_AppStore_2025"
-        APP_STORE_CONNECT_KEY_ID: $APP_STORE_CONNECT_KEY_ID 
-        APP_STORE_CONNECT_ISSUER_ID: $APP_STORE_CONNECT_ISSUER_ID
-        APP_STORE_CONNECT_PRIVATE_KEY: $APP_STORE_CONNECT_PRIVATE_KEY
         NODE_OPTIONS: "--max-old-space-size=4096"
-      groups:
-        - Papricut
-    triggering:
-      events:
-        - push
+    cache:
+      cache_paths:
+        - ~/.npm
+        - .angular/cache
     scripts:
       - name: Install System Dependencies
         script: |
@@ -41,63 +36,18 @@ workflows:
             exit 1
           fi
 
-      - name: Build Production Assets
+      - name: Build and Sync
         script: |
-          # Clean previous builds
+          echo "=== CLEANING PREVIOUS BUILDS ==="
           rm -rf www
-          
-          # Build with production configuration
           echo "=== BUILDING PRODUCTION ASSETS ==="
-          npm run build -- --configuration production
-          
-          # Fallback if needed
-          if [ ! -d "www" ]; then
-            echo "=== ATTEMPTING ALTERNATIVE BUILD ==="
-            ionic build --prod
-          fi
-
-          # Verify www directory
+          npm run build -- --configuration production --verbose
+          echo "=== VERIFYING BUILD OUTPUT ==="
           if [ ! -d "www" ]; then
             echo "❌ Build failed - www directory not created"
             exit 1
           fi
-
-      - name: Sync Capacitor
-        script: |
-          echo "=== SYNCING WITH CAPACITOR ==="
-          npx cap sync ios
-          npx cap copy ios
-      - name: Build Production Assets (Robust)
-        script: |
-          # Clean previous builds
-          rm -rf www
-          
-          # Build with production configuration
-          echo "=== BUILDING PRODUCTION ASSETS ==="
-          npm run build -- --configuration production
-          
-          # Fallback if needed
-          if [ ! -d "www" ]; then
-            echo "=== ATTEMPTING ALTERNATIVE BUILD ==="
-            ionic build --prod
-          fi
-
-          # Verify www directory exists
-          if [ ! -d "www" ]; then
-            echo "❌ Build failed - www directory not created"
-            exit 1
-          fi
-
-          # Verify critical files exist (using hashed filename patterns)
-          REQUIRED_PATTERNS=(
-            "index.html"
-            "main.*.js"
-            "polyfills.*.js"
-            "runtime.*.js"
-            "styles.*.css"
-            "assets/"
-          )
-
+          REQUIRED_PATTERNS=("index.html" "main.*.js" "polyfills.*.js" "runtime.*.js" "styles.*.css" "assets/")
           MISSING_FILES=0
           for pattern in "${REQUIRED_PATTERNS[@]}"; do
             if ! compgen -G "www/$pattern" > /dev/null; then
@@ -105,17 +55,11 @@ workflows:
               MISSING_FILES=$((MISSING_FILES+1))
             fi
           done
-
           if [ $MISSING_FILES -gt 0 ]; then
             echo "=== BUILD OUTPUT CONTENTS ==="
             ls -la www/
-            echo "❌ Critical files missing - build failed"
             exit 1
           fi
-
-          echo "✅ All required assets verified successfully"
-      - name: Prepare Capacitor Assets
-        script: |
           echo "=== PREPARING CAPACITOR ASSETS ==="
           MAIN_JS=$(find www -name "main.*.js" | head -n 1)
           RUNTIME_JS=$(find www -name "runtime.*.js" | head -n 1)
@@ -123,54 +67,40 @@ workflows:
           sed -i.bak "s|main.js|$(basename "$MAIN_JS")|g" www/index.html
           sed -i.bak "s|runtime.js|$(basename "$RUNTIME_JS")|g" www/index.html
           sed -i.bak "s|styles.css|$(basename "$STYLES_CSS")|g" www/index.html
+          echo "=== SYNCING WITH CAPACITOR ==="
+          npx cap sync ios --verbose
+          npx cap copy ios --verbose
+          if [ ! -d "ios/App/App/public" ]; then
+            echo "❌ Capacitor sync failed - public directory missing"
+            exit 1
+          fi
 
-          # Verify modifications
-          if ! grep -q "$(basename "$MAIN_JS")" www/index.html; then
-            echo "❌ Failed to update index.html with hashed main.js"
-            exit 1
-          fi
-          if ! grep -q "$(basename "$RUNTIME_JS")" www/index.html; then
-            echo "❌ Failed to update index.html with hashed runtime.js"
-            exit 1
-          fi
-          if ! grep -q "$(basename "$STYLES_CSS")" www/index.html; then
-            echo "❌ Failed to update index.html with hashed styles.css"
-            exit 1
-          fi
-      - name: Verify Angular Configuration
+      - name: Configure Podfile
         script: |
-          if ! jq -e '.projects.app.architect.build.configurations.production' angular.json >/dev/null; then
-            echo "❌ Missing production build config in angular.json"
-            echo "Current configurations:"
-            jq '.projects.app.architect.build.configurations' angular.json
-            exit 1
-          fi
+          echo "platform :ios, '13.0'" > ios/App/Podfile
+          echo "use_frameworks!" >> ios/App/Podfile
+          echo "" >> ios/App/Podfile
+          echo "target 'App' do" >> ios/App/Podfile
+          echo "  capacitor_pods" >> ios/App/Podfile
+          echo "  pod 'Capacitor', :path => '../../node_modules/@capacitor/ios'" >> ios/App/Podfile
+          echo "  pod 'CapacitorCordova', :path => '../../node_modules/@capacitor/ios'" >> ios/App/Podfile
+          echo "  pod 'CapacitorCamera', :path => '../../node_modules/@capacitor/camera'" >> ios/App/Podfile
+          echo "end" >> ios/App/Podfile
+          pod install --project-directory=ios/App --verbose
 
       - name: Sync Capacitor (Robust)
         script: |
           echo "=== CLEANING PODS ==="
           rm -rf ios/App/Pods ios/App/Podfile.lock
           pod cache clean --all --project-directory=ios/App
-
           echo "=== SYNCING WEB ASSETS TO IOS ==="
           npx cap sync ios --verbose
           npx cap copy ios --verbose
-
-          # Verify web assets
           if [ ! -d "ios/App/App/public" ]; then
             echo "❌ Capacitor sync failed - public directory missing"
             find ios/App/App -name "index.html" || echo "No web assets found"
             exit 1
           fi
-
-          # Verify Podfile and frameworks
-          if [ ! -f "ios/App/Podfile" ]; then
-            echo "❌ Podfile missing"
-            exit 1
-          fi
-          pod install --project-directory=ios/App --verbose
-
-          # Verify frameworks in Xcode project
           FRAMEWORK_PATH="ios/App/App/Frameworks"
           if [ ! -d "$FRAMEWORK_PATH/Capacitor.framework" ]; then
             echo "❌ Capacitor.framework missing in Xcode project"
@@ -185,80 +115,68 @@ workflows:
             echo "❌ CapacitorCamera.framework missing in Xcode project"
             exit 1
           fi
-
           echo "=== GENERATING NATIVE ASSETS ==="
           cordova-res ios --skip-config --copy
           npx cap sync ios --verbose
 
-      - name: Clean Build Environment
-        script: |
-          rm -rf ~/Library/Developer/Xcode/DerivedData/*
-          rm -rf "$HOME/build"
-          mkdir -p "$HOME/build"
-
-      - name: Decode Signing Assets
-        script: |
-          echo "$DISTRIBUTION_CERTIFICATE" | base64 --decode > signing.p12
-          echo "$PROVISIONING_PROFILE" | base64 --decode > "$PROFILE_NAME.mobileprovision"
-
-      - name: Install Provisioning Profile
-        script: |
-          mkdir -p ~/Library/MobileDevice/Provisioning\ Profiles
-          PROFILE_UUID=$(/usr/libexec/PlistBuddy -c 'Print UUID' /dev/stdin <<< $(security cms -D -i "$PROFILE_NAME.mobileprovision"))
-          cp "$PROFILE_NAME.mobileprovision" ~/Library/MobileDevice/Provisioning\ Profiles/"$PROFILE_UUID".mobileprovision
-          echo "export PROFILE_UUID=$PROFILE_UUID" >> $CM_ENV
-
-      - name: Setup Code Signing
-        script: |
-          security create-keychain -p "" build.keychain
-          security import signing.p12 -k build.keychain -P "$CERTIFICATE_PASSWORD" -T /usr/bin/codesign
-          security list-keychains -s build.keychain
-          security default-keychain -s build.keychain
-          security unlock-keychain -p "" build.keychain
-          security set-key-partition-list -S apple-tool:,apple: -k "" build.keychain
-
-      - name: Configure Pods Project
-        script: |
-          # Disable code signing for Pods
-          /usr/libexec/PlistBuddy -c "Add :objects:13D8C11F2543F3D900D83B1E:buildSettings:CODE_SIGNING_ALLOWED string NO" ios/App/Pods/Pods.xcodeproj/project.pbxproj
-          /usr/libexec/PlistBuddy -c "Add :objects:13D8C11F2543F3D900D83B1E:buildSettings:CODE_SIGNING_REQUIRED string NO" ios/App/Pods/Pods.xcodeproj/project.pbxproj
-
-      - name: Increment Build Number
+      - name: Update Info.plist
         script: |
           PLIST_PATH="ios/App/App/Info.plist"
-          CURRENT_BUILD=$(/usr/libexec/PlistBuddy -c "Print CFBundleVersion" "$PLIST_PATH")
-          NEW_BUILD=$((CURRENT_BUILD + 1))
-          /usr/libexec/PlistBuddy -c "Set CFBundleVersion $NEW_BUILD" "$PLIST_PATH"
-          echo "Updated build number from $CURRENT_BUILD to $NEW_BUILD"
+          /usr/libexec/PlistBuddy -c "Set :UILaunchStoryboardName LaunchScreen" "$PLIST_PATH"
+          /usr/libexec/PlistBuddy -c "Set :UISupportedInterfaceOrientations:0 UIInterfaceOrientationPortrait" "$PLIST_PATH"
+          /usr/libexec/PlistBuddy -c "Add :NSAppTransportSecurity:NSExceptionDomains:api.papricut.com dict" "$PLIST_PATH" || true
+          /usr/libexec/PlistBuddy -c "Set :NSAppTransportSecurity:NSExceptionDomains:api.papricut.com:NSIncludesSubdomains bool true" "$PLIST_PATH"
+          /usr/libexec/PlistBuddy -c "Set :NSAppTransportSecurity:NSExceptionDomains:api.papricut.com:NSExceptionAllowsInsecureHTTPLoads bool false" "$PLIST_PATH"
+          /usr/libexec/PlistBuddy -c "Set :NSAppTransportSecurity:NSExceptionDomains:api.papricut.com:NSExceptionRequiresForwardSecrecy bool true" "$PLIST_PATH"
+          /usr/libexec/PlistBuddy -c "Set :NSAppTransportSecurity:NSExceptionDomains:api.papricut.com:NSExceptionMinimumTLSVersion string TLSv1.2" "$PLIST_PATH"
+          /usr/libexec/PlistBuddy -c "Add :NSAppTransportSecurity:NSExceptionDomains:cdn.papricut.com dict" "$PLIST_PATH" || true
+          /usr/libexec/PlistBuddy -c "Set :NSAppTransportSecurity:NSExceptionDomains:cdn.papricut.com:NSIncludesSubdomains bool true" "$PLIST_PATH"
+          /usr/libexec/PlistBuddy -c "Set :NSAppTransportSecurity:NSExceptionDomains:cdn.papricut.com:NSExceptionAllowsInsecureHTTPLoads bool false" "$PLIST_PATH"
+          /usr/libexec/PlistBuddy -c "Set :NSAppTransportSecurity:NSExceptionDomains:cdn.papricut.com:NSExceptionRequiresForwardSecrecy bool true" "$PLIST_PATH"
+          /usr/libexec/PlistBuddy -c "Set :NSAppTransportSecurity:NSExceptionDomains:cdn.papricut.com:NSExceptionMinimumTLSVersion string TLSv1.2" "$PLIST_PATH"
+
+      - name: Verify Xcode Project
+        script: |
+          echo "=== CHECKING XCODE PROJECT ==="
+          if ! grep -q "Capacitor.framework" ios/App/App.xcworkspace; then
+            echo "❌ Capacitor.framework not referenced in Xcode project"
+            exit 1
+          fi
+          if [ ! -f "ios/App/Podfile" ]; then
+            echo "❌ Podfile missing"
+            exit 1
+          fi
+          pod install --project-directory=ios/App
 
       - name: Build IPA (Robust)
         script: |
           export NSUnbufferedIO=YES
           echo "=== ARCHIVING APP ==="
           xcodebuild -workspace "$XCODE_WORKSPACE" \
-                    -scheme "$XCODE_SCHEME" \
-                    -sdk iphoneos \
-                    -configuration Release \
-                    -archivePath "$HOME/build/App.xcarchive" \
-                    -allowProvisioningUpdates \
-                    -destination 'generic/platform=iOS' \
-                    DEVELOPMENT_TEAM="$TEAM_ID" \
-                    PRODUCT_BUNDLE_IDENTIFIER="$BUNDLE_ID" \
-                    CODE_SIGN_STYLE="Manual" \
-                    CODE_SIGN_IDENTITY="iPhone Distribution" \
-                    PROVISIONING_PROFILE="$PROFILE_UUID" \
-                    OTHER_CODE_SIGN_FLAGS="--keychain build.keychain" \
-                    ENABLE_BITCODE=NO \
-                    BUILD_LIBRARY_FOR_DISTRIBUTION=YES \
-                    EMBEDDED_CONTENT_CONTAINS_SWIFT=YES \
-                    ALWAYS_EMBED_SWIFT_STANDARD_LIBRARIES=YES \
-                    archive | tee "$HOME/build/archive_log.txt"
+                     -scheme "$XCODE_SCHEME" \
+                     -sdk iphoneos \
+                     -configuration Release \
+                     -archivePath "$HOME/build/App.xcarchive" \
+                     -allowProvisioningUpdates \
+                     -destination 'generic/platform=iOS' \
+                     DEVELOPMENT_TEAM="$TEAM_ID" \
+                     PRODUCT_BUNDLE_IDENTIFIER="$BUNDLE_ID" \
+                     CODE_SIGN_STYLE="Manual" \
+                     CODE_SIGN_IDENTITY="iPhone Distribution" \
+                     PROVISIONING_PROFILE="$PROFILE_UUID" \
+                     OTHER_CODE_SIGN_FLAGS="--keychain build.keychain" \
+                     ENABLE_BITCODE=NO \
+                     BUILD_LIBRARY_FOR_DISTRIBUTION=YES \
+                     EMBEDDED_CONTENT_CONTAINS_SWIFT=YES \
+                     ALWAYS_EMBED_SWIFT_STANDARD_LIBRARIES=YES \
+                     archive | tee "$HOME/build/archive_log.txt"
           echo "=== EXPORTING IPA ==="
           xcodebuild -exportArchive \
-                    -archivePath "$HOME/build/App.xcarchive" \
-                    -exportPath "$HOME/build/ipa" \
-                    -exportOptionsPlist ExportOptions.plist \
-                    -allowProvisioningUpdates | tee "$HOME/build/export_log.txt"
+                     -archivePath "$HOME/build/App.xcarchive" \
+                     -exportPath "$HOME/build/ipa" \
+                     -exportOptionsPlist ExportOptions.plist \
+                     -allowProvisioningUpdates | tee "$HOME/build/export_log.txt"
+
       - name: Validate Bundle (Comprehensive)
         script: |
           APP_PATH="$HOME/build/App.xcarchive/Products/Applications/App.app"
