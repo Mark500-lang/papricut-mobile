@@ -91,40 +91,42 @@ workflows:
             ionic build --prod
           fi
 
-          # Verify www directory and main assets
-          echo "=== VERIFYING BUILD OUTPUT ==="
+          # Verify www directory exists
           if [ ! -d "www" ]; then
             echo "❌ Build failed - www directory not created"
             exit 1
           fi
 
-          # Find the hashed main.js file
-          MAIN_JS=$(find www -name "main.*.js" | head -n 1)
-          if [ -z "$MAIN_JS" ]; then
-            echo "❌ Could not find main.js file"
+          # Verify critical files exist (using both hashed and non-hashed patterns)
+          REQUIRED_FILES=(
+            "index.html"
+            "main.*.js"
+            "main.js"
+            "polyfills.*.js"
+            "polyfills.js"
+            "runtime.*.js"
+            "runtime.js"
+            "styles.*.css"
+            "styles.css"
+            "assets/"
+          )
+
+          MISSING_FILES=0
+          for pattern in "${REQUIRED_FILES[@]}"; do
+            if ! compgen -G "www/$pattern" > /dev/null; then
+              echo "⚠️ Missing file pattern: www/$pattern"
+              MISSING_FILES=$((MISSING_FILES+1))
+            fi
+          done
+
+          if [ $MISSING_FILES -gt 0 ]; then
+            echo "❌ Critical files missing - build failed"
             echo "www contents:"
             ls -la www/
             exit 1
           fi
 
-          # Verify critical files exist
-          REQUIRED_ASSETS=(
-            "index.html"
-            "$(basename "$MAIN_JS")"
-            "polyfills.*.js"
-            "runtime.*.js"
-            "styles.*.css"
-            "assets/"
-          )
-
-          for asset in "${REQUIRED_ASSETS[@]}"; do
-            if ! compgen -G "www/$asset" > /dev/null; then
-              echo "❌ Missing required asset pattern: www/$asset"
-              echo "www contents:"
-              ls -la www/
-              exit 1
-            fi
-          done
+          echo "✅ All required assets verified successfully"
       - name: Prepare Capacitor Assets
         script: |
           echo "=== PREPARING CAPACITOR ASSETS ==="
