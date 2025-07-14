@@ -170,47 +170,64 @@ workflows:
           fi
           
           echo "✅ Web assets validated successfully"
+      - name: Setup CocoaPods
+        script: |
+          echo "Installing correct CocoaPods version..."
+          gem uninstall cocoapods -a -x
+          gem install cocoapods -v 1.15.2
+          pod --version
       - name: Configure Podfile
         script: |
           echo "=== PODFILE VERIFICATION ==="
           
-          # Add the warning suppression to Podfile
-          echo "Updating Podfile..."
-          echo "install! 'cocoapods', :warn_for_unused_master_specs_repo => false" >> ios/App/Podfile
-          
-          echo "Running pod install..."
-          cd ios/App && pod install --repo-update && cd ../..
-          
-          # More accurate verification - check multiple locations
-          echo "Verifying pod installation..."
-          POD_INSTALLED=false
-          
-          # Check standard pod location
-          if [ -d "ios/App/Pods/Capacitor" ]; then
-            POD_INSTALLED=true
-          fi
-          
-          # Check Capacitor framework build
-          if [ -d "ios/App/Pods/Target Support Files/Capacitor" ]; then
-            POD_INSTALLED=true
-          fi
-          
-          # Check build products
-          if [ -d "ios/App/Pods/Products/Capacitor.framework" ]; then
-            POD_INSTALLED=true
-          fi
-          
-          # Final verification
-          if [ "$POD_INSTALLED" = false ]; then
-            echo "❌ Capacitor pod verification failed"
-            echo "Debug info:"
-            echo "Current directory: $(pwd)"
-            echo "Pod directory contents:"
-            ls -R ios/App/Pods/ | grep -i capacitor
+          # 1. First ensure the Podfile exists
+          if [ ! -f "ios/App/Podfile" ]; then
+            echo "❌ Podfile not found at ios/App/Podfile"
             exit 1
           fi
+
+          # 2. Clean any previous pod installation
+          echo "Cleaning previous pod installation..."
+          rm -rf ios/App/Pods ios/App/Podfile.lock ios/App/App.xcworkspace
+
+          # 3. Properly modify Podfile (using temporary file for safety)
+          echo "Updating Podfile with correct syntax..."
+          TEMP_FILE=$(mktemp)
+          awk '1; /^end$/ && !modifed {print "install! '\''cocoapods'\'', :warn_for_unused_master_specs_repo => false"; modifed=1}' ios/App/Podfile > "$TEMP_FILE"
+          mv "$TEMP_FILE" ios/App/Podfile
+
+          # 4. Show final Podfile for debugging
+          echo "Final Podfile contents:"
+          cat ios/App/Podfile
+
+          # 5. Run pod install with full clean
+          echo "Running pod install..."
+          cd ios/App && pod install --clean-install --repo-update && cd ../..
+
+          # 6. Verify installation through multiple methods
+          echo "Verifying installation..."
           
-          echo "✅ Pod installation verified"
+          # Method 1: Check Podfile.lock
+          if [ ! -f "ios/App/Podfile.lock" ]; then
+            echo "❌ Podfile.lock not generated"
+            exit 1
+          fi
+
+          # Method 2: Check for Capacitor in lockfile
+          if ! grep -q "Capacitor (" "ios/App/Podfile.lock"; then
+            echo "❌ Capacitor not found in Podfile.lock"
+            echo "Podfile.lock contents:"
+            cat ios/App/Podfile.lock
+            exit 1
+          fi
+
+          # Method 3: Check workspace generation
+          if [ ! -d "ios/App/App.xcworkspace" ]; then
+            echo "❌ Xcode workspace not generated"
+            exit 1
+          fi
+
+          echo "✅ Pod installation successfully verified"
       - name: Verify iOS Platform
         script: |
           echo "=== IOS PLATFORM CHECK ==="
