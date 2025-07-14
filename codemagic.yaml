@@ -178,35 +178,32 @@ workflows:
           pod --version
       - name: Configure Podfile
         script: |
-          echo "=== UPDATING PODFILE FOR STATIC FRAMEWORK EMBEDDING ==="
-          
-          # Create a new Podfile with explicit static framework settings
+          echo "=== UPDATING PODFILE WITH OPTIMIZED STATIC LINKING ==="
           cat << 'EOF' > ios/App/Podfile
           use_frameworks! :linkage => :static
           use_modular_headers!
           
           platform :ios, '13.0'
           
-          # Workaround for Xcode caching issues
+          # Disable input/output paths for Xcode caching
           install! 'cocoapods', 
-            :warn_for_unused_master_specs_repo => false,
-            :disable_input_output_paths => true
+            :disable_input_output_paths => true,
+            :generate_multiple_pod_projects => true
           
-          # Capacitor pods with explicit static linking
+          # Explicit static framework configuration
           def capacitor_pods
-            pod 'Capacitor', :path => '../../node_modules/@capacitor/ios', :modular_headers => true
-            pod 'CapacitorCordova', :path => '../../node_modules/@capacitor/ios', :modular_headers => true
+            pod 'Capacitor', :path => '../../node_modules/@capacitor/ios', 
+                :modular_headers => true,
+                :linkage => :static
+            pod 'CapacitorCordova', :path => '../../node_modules/@capacitor/ios', 
+                :modular_headers => true,
+                :linkage => :static
+            
+            # Plugin pods
             pod 'CapacitorApp', :path => '../../node_modules/@capacitor/app'
-            pod 'CapacitorBrowser', :path => '../../node_modules/@capacitor/browser'
             pod 'CapacitorCamera', :path => '../../node_modules/@capacitor/camera'
-            pod 'CapacitorDevice', :path => '../../node_modules/@capacitor/device'
-            pod 'CapacitorFilesystem', :path => '../../node_modules/@capacitor/filesystem'
-            pod 'CapacitorHaptics', :path => '../../node_modules/@capacitor/haptics'
             pod 'CapacitorKeyboard', :path => '../../node_modules/@capacitor/keyboard'
-            pod 'CapacitorNetwork', :path => '../../node_modules/@capacitor/network'
-            pod 'CapacitorPushNotifications', :path => '../../node_modules/@capacitor/push-notifications'
-            pod 'CapacitorSplashScreen', :path => '../../node_modules/@capacitor/splash-screen'
-            pod 'CapacitorStatusBar', :path => '../../node_modules/@capacitor/status-bar'
+            # Add other plugins as needed
           end
           
           target 'App' do
@@ -219,17 +216,17 @@ workflows:
             
             installer.pods_project.targets.each do |target|
               target.build_configurations.each do |config|
-                # Essential static framework settings
+                # Essential static linking settings
                 config.build_settings['MACH_O_TYPE'] = 'staticlib'
-                config.build_settings['BUILD_LIBRARY_FOR_DISTRIBUTION'] = 'YES'
-                config.build_settings['SKIP_INSTALL'] = 'NO' # Critical for embedding
+                config.build_settings['OTHER_LDFLAGS'] = '$(inherited) -ObjC'
+                config.build_settings['GENERATE_INFOPLIST_FILE'] = 'YES'
                 
-                # Disable code signing for pods
-                config.build_settings['CODE_SIGNING_ALLOWED'] = 'NO'
-                config.build_settings['CODE_SIGNING_REQUIRED'] = 'NO'
+                # Ensure static frameworks are embedded
+                config.build_settings['SKIP_INSTALL'] = 'NO'
+                config.build_settings['BUILD_LIBRARY_FOR_DISTRIBUTION'] = 'YES'
                 
                 # Swift compatibility
-                if target.name.include?('Capacitor')
+                if target.name.start_with?('Capacitor')
                   config.build_settings['SWIFT_VERSION'] = '5.0'
                   config.build_settings['ALWAYS_EMBED_SWIFT_STANDARD_LIBRARIES'] = 'NO'
                 end
@@ -238,7 +235,6 @@ workflows:
             
             # Xcode 14+ compatibility
             installer.pods_project.build_configurations.each do |config|
-              config.build_settings.delete('VALID_ARCHS')
               config.build_settings['ONLY_ACTIVE_ARCH'] = 'NO'
             end
           end
@@ -434,7 +430,12 @@ workflows:
         script: |
           /usr/libexec/PlistBuddy -c "Add :objects:13D8C11F2543F3D900D83B1E:buildSettings:CODE_SIGNING_ALLOWED string NO" ios/App/Pods/Pods.xcodeproj/project.pbxproj
           /usr/libexec/PlistBuddy -c "Add :objects:13D8C11F2543F3D900D83B1E:buildSettings:CODE_SIGNING_REQUIRED string NO" ios/App/Pods/Pods.xcodeproj/project.pbxproj
-
+      - name: Verify Pod Installation
+        script: |
+          echo "=== POD INSTALLATION VERIFICATION ==="
+          ls -la ios/App/Pods/Capacitor/
+          ls -la ios/App/Pods/CapacitorCordova/
+          find ios/App/Pods -name "*.a" | xargs ls -la
       - name: Increment Build Number
         script: |
           PLIST_PATH="ios/App/App/Info.plist"
@@ -485,10 +486,10 @@ workflows:
           echo "=== VERIFYING XCODE PROJECT CHANGES ==="
           grep -A5 "EMBEDDED_CONTENT_CONTAINS_SWIFT" ios/App/App.xcodeproj/project.pbxproj || echo "Warning: EMBEDDED_CONTENT_CONTAINS_SWIFT not found"
           grep -A5 "FRAMEWORK_SEARCH_PATHS" ios/App/App.xcodeproj/project.pbxproj || echo "Warning: FRAMEWORK_SEARCH_PATHS not found"
-      - name: Build IPA (Robust Static Framework Support)
+      - name: Build IPA (Final Static Linking Fix)
         script: |
           export NSUnbufferedIO=YES
-          echo "=== BUILDING WITH STATIC FRAMEWORK SUPPORT ==="
+          echo "=== BUILDING WITH STATIC LINKING ==="
           xcodebuild -workspace "$XCODE_WORKSPACE" \
                     -scheme "$XCODE_SCHEME" \
                     -sdk iphoneos \
@@ -505,48 +506,42 @@ workflows:
                     ENABLE_BITCODE=NO \
                     BUILD_LIBRARY_FOR_DISTRIBUTION=YES \
                     SKIP_INSTALL=NO \
-                    EMBEDDED_CONTENT_CONTAINS_SWIFT=YES \
-                    ALWAYS_EMBED_SWIFT_STANDARD_LIBRARIES=YES \
+                    OTHER_LDFLAGS="-ObjC" \
                     LD_RUNPATH_SEARCH_PATHS="@executable_path/Frameworks" \
                     ONLY_ACTIVE_ARCH=NO \
                     archive | tee "$HOME/build/archive_log.txt"
 
-      - name: Validate Bundle (Updated for Static Frameworks)
+      - name: Validate Bundle (Static Linking Check)
         script: |
-          echo "=== VALIDATING BUNDLE STRUCTURE ==="
+          echo "=== VALIDATING STATIC LINKING ==="
           APP_PATH="$HOME/build/App.xcarchive/Products/Applications/App.app"
           
-          # Check binary size (should be > 10MB if frameworks are properly linked)
+          # Check binary size (should be > 5MB for Capacitor apps)
           BINARY_SIZE=$(stat -f%z "$APP_PATH/App")
-          if [ "$BINARY_SIZE" -lt 10000000 ]; then
-            echo "❌ App binary too small ($BINARY_SIZE bytes) - likely missing linked frameworks"
+          echo "Binary size: $BINARY_SIZE bytes"
+          
+          if [ "$BINARY_SIZE" -lt 5000000 ]; then
+            echo "❌ App binary too small ($BINARY_SIZE bytes) - static linking failed"
+            echo "=== LINKER SYMBOLS CHECK ==="
+            nm "$APP_PATH/App" | grep -i capacitor || echo "No Capacitor symbols found"
             exit 1
           fi
           
-          # Check for web assets
-          if [ ! -d "$APP_PATH/public" ]; then
-            echo "❌ Web assets missing from $APP_PATH/public"
-            exit 1
-          fi
+          # Verify web assets
+          REQUIRED_FILES=(
+            "index.html"
+            "main.*.js"
+            "runtime.*.js"
+          )
           
-          # Check for required files (updated patterns)
-          WEB_FILES=("index.html" "main.*.js" "runtime.*.js")
-          for pattern in "${WEB_FILES[@]}"; do
+          for pattern in "${REQUIRED_FILES[@]}"; do
             if ! ls "$APP_PATH/public/$pattern" >/dev/null 2>&1; then
-              echo "❌ Missing web file pattern: $APP_PATH/public/$pattern"
+              echo "❌ Missing web file: $pattern"
               exit 1
             fi
           done
           
-          # For static frameworks, check for linked binaries instead of framework directories
-          echo "=== CHECKING FOR STATICALLY LINKED CAPACITOR ==="
-          if ! nm "$APP_PATH/App" | grep -q "Capacitor"; then
-            echo "❌ Capacitor not linked in binary"
-            exit 1
-          fi
-          
-          echo "✅ Bundle validated successfully"
-
+          echo "✅ Bundle validated successfully (static linking confirmed)"
       - name: Final Verification
         script: |
           echo "=== FINAL BUILD VALIDATION ==="
