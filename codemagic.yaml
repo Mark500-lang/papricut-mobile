@@ -301,19 +301,27 @@ workflows:
 
       - name: Update Info.plist
         script: |
+          echo "=== UPDATING INFO.PLIST ==="
           PLIST_PATH="ios/App/App/Info.plist"
-          /usr/libexec/PlistBuddy -c "Set :UILaunchStoryboardName LaunchScreen" "$PLIST_PATH"
-          /usr/libexec/PlistBuddy -c "Set :UISupportedInterfaceOrientations:0 UIInterfaceOrientationPortrait" "$PLIST_PATH"
-          /usr/libexec/PlistBuddy -c "Add :NSAppTransportSecurity:NSExceptionDomains:api.papricut.com dict" "$PLIST_PATH" || true
-          /usr/libexec/PlistBuddy -c "Set :NSAppTransportSecurity:NSExceptionDomains:api.papricut.com:NSIncludesSubdomains bool true" "$PLIST_PATH"
-          /usr/libexec/PlistBuddy -c "Set :NSAppTransportSecurity:NSExceptionDomains:api.papricut.com:NSExceptionAllowsInsecureHTTPLoads bool false" "$PLIST_PATH"
-          /usr/libexec/PlistBuddy -c "Set :NSAppTransportSecurity:NSExceptionDomains:api.papricut.com:NSExceptionRequiresForwardSecrecy bool true" "$PLIST_PATH"
-          /usr/libexec/PlistBuddy -c "Set :NSAppTransportSecurity:NSExceptionDomains:api.papricut.com:NSExceptionMinimumTLSVersion string TLSv1.2" "$PLIST_PATH"
-          /usr/libexec/PlistBuddy -c "Add :NSAppTransportSecurity:NSExceptionDomains:cdn.papricut.com dict" "$PLIST_PATH" || true
-          /usr/libexec/PlistBuddy -c "Set :NSAppTransportSecurity:NSExceptionDomains:cdn.papricut.com:NSIncludesSubdomains bool true" "$PLIST_PATH"
-          /usr/libexec/PlistBuddy -c "Set :NSAppTransportSecurity:NSExceptionDomains:cdn.papricut.com:NSExceptionAllowsInsecureHTTPLoads bool false" "$PLIST_PATH"
-          /usr/libexec/PlistBuddy -c "Set :NSAppTransportSecurity:NSExceptionDomains:cdn.papricut.com:NSExceptionRequiresForwardSecrecy bool true" "$PLIST_PATH"
-          /usr/libexec/PlistBuddy -c "Set :NSAppTransportSecurity:NSExceptionDomains:cdn.papricut.com:NSExceptionMinimumTLSVersion string TLSv1.2" "$PLIST_PATH"
+          
+          # First create the base ATS dictionary if it doesn't exist
+          /usr/libexec/PlistBuddy -c "Add :NSAppTransportSecurity dict" "$PLIST_PATH" || true
+          
+          # Create exception domains dictionaries
+          for domain in "api.papricut.com" "cdn.papricut.com"; do
+            # Create domain dictionary if it doesn't exist
+            /usr/libexec/PlistBuddy -c "Add :NSAppTransportSecurity:NSExceptionDomains dict" "$PLIST_PATH" || true
+            /usr/libexec/PlistBuddy -c "Add :NSAppTransportSecurity:NSExceptionDomains:${domain} dict" "$PLIST_PATH" || true
+            
+            # Now safely add the values
+            /usr/libexec/PlistBuddy -c "Set :NSAppTransportSecurity:NSExceptionDomains:${domain}:NSIncludesSubdomains true" "$PLIST_PATH"
+            /usr/libexec/PlistBuddy -c "Set :NSAppTransportSecurity:NSExceptionDomains:${domain}:NSExceptionAllowsInsecureHTTPLoads false" "$PLIST_PATH"
+            /usr/libexec/PlistBuddy -c "Set :NSAppTransportSecurity:NSExceptionDomains:${domain}:NSExceptionRequiresForwardSecrecy true" "$PLIST_PATH"
+            /usr/libexec/PlistBuddy -c "Set :NSAppTransportSecurity:NSExceptionDomains:${domain}:NSExceptionMinimumTLSVersion TLSv1.2" "$PLIST_PATH"
+          done
+          
+          echo "Updated Info.plist contents:"
+          plutil -convert xml1 "$PLIST_PATH" -o -
 
       - name: Clean Build Environment
         script: |
