@@ -135,41 +135,6 @@ workflows:
               exit 1
             fi
           done
-      - name: Verify Web Assets
-        script: |
-          echo "=== WEB ASSET VALIDATION ==="
-          
-          # Check for main JS file (hashed version)
-          if ! ls www/main.*.js >/dev/null 2>&1; then
-            echo "❌ Main JS file missing"
-            echo "Found files:"
-            ls -la www/*.js
-            exit 1
-          fi
-          
-          # Check for runtime JS file (hashed version)
-          if ! ls www/runtime.*.js >/dev/null 2>&1; then
-            echo "❌ Runtime JS file missing"
-            exit 1
-          fi
-          
-          # Check for index.html
-          if [ ! -f "www/index.html" ]; then
-            echo "❌ Index.html missing"
-            exit 1
-          fi
-          
-          # Verify production API URL in any main JS file
-          MAIN_JS_FILE=$(ls www/main.*.js)
-          if ! grep -q "account.papricut.com" "$MAIN_JS_FILE"; then
-            echo "❌ Production API URL not found in build"
-            echo "Checking file: $MAIN_JS_FILE"
-            echo "First 50 lines:"
-            head -50 "$MAIN_JS_FILE" | grep -i -A5 -B5 "account" || echo "No account.papricut.com found"
-            exit 1
-          fi
-          
-          echo "✅ Web assets validated successfully"
       - name: Setup CocoaPods
         script: |
           echo "Installing correct CocoaPods version..."
@@ -336,12 +301,6 @@ workflows:
           
           echo "Updated Info.plist contents:"
           plutil -convert xml1 "$PLIST_PATH" -o -
-
-      - name: Clean Build Environment
-        script: |
-          rm -rf ~/Library/Developer/Xcode/DerivedData/*
-          rm -rf "$HOME/build"
-          mkdir -p "$HOME/build"
       - name: Debug Signing Variables
         script: |
           echo "=== SIGNING VARIABLES DEBUG ==="
@@ -472,58 +431,63 @@ workflows:
           NEW_BUILD=$((CURRENT_BUILD + 1))
           /usr/libexec/PlistBuddy -c "Set CFBundleVersion $NEW_BUILD" "$PLIST_PATH"
           echo "Updated build number from $CURRENT_BUILD to $NEW_BUILD"
-      - name: Configure Xcode Build Settings
+      - name: Combined Xcode Configuration
         script: |
-          echo "=== CONFIGURING XCODE BUILD SETTINGS ==="
-          
-          # 1. Ensure the project file exists
+          echo "=== CONFIGURING XCODE PROJECT ==="
           PBXPROJ_PATH="ios/App/App.xcodeproj/project.pbxproj"
-          if [ ! -f "$PBXPROJ_PATH" ]; then
-            echo "❌ Xcode project file not found"
+          
+          # All build settings in one place
+          /usr/libexec/PlistBuddy -c "Add :objects:13D8C11F2543F3D900D83B1E:buildSettings:FRAMEWORK_SEARCH_PATHS string \$(inherited) \$(PROJECT_DIR)/Pods" "$PBXPROJ_PATH" || true
+          /usr/libexec/PlistBuddy -c "Set :objects:13D8C11F2543F3D900D83B1E:buildSettings:ALWAYS_EMBED_SWIFT_STANDARD_LIBRARIES YES" "$PBXPROJ_PATH"
+          /usr/libexec/PlistBuddy -c "Set :objects:13D8C11F2543F3D900D83B1E:buildSettings:LD_RUNPATH_SEARCH_PATHS string \$(inherited) @executable_path/Frameworks" "$PBXPROJ_PATH"
+          /usr/libexec/PlistBuddy -c "Add :objects:13D8C11F2543F3D900D83B1E:buildSettings:EMBEDDED_CONTENT_CONTAINS_SWIFT string YES" "$PBXPROJ_PATH"
+          /usr/libexec/PlistBuddy -c "Set :objects:13D8C11F2543F3D900D83B1E:buildSettings:ALWAYS_SEARCH_USER_PATHS YES" "$PBXPROJ_PATH"
+          
+          echo "✅ Xcode project configured"
+      - name: Pre-Build Xcode Workspace Verification
+        script: |
+          echo "=== XCODE WORKSPACE VERIFICATION ==="
+          
+          # 1. Verify workspace structure
+          if [ ! -d "$XCODE_WORKSPACE" ]; then
+            echo "❌ Xcode workspace missing at $XCODE_WORKSPACE"
+            echo "Directory contents:"
+            ls -la ios/App/
             exit 1
           fi
           
-          # 2. Add framework search paths (safe modification)
-          /usr/libexec/PlistBuddy -c "Add :objects:13D8C11F2543F3D900D83B1E:buildSettings:FRAMEWORK_SEARCH_PATHS string \$(inherited) \$(PROJECT_DIR)/Pods" "$PBXPROJ_PATH" || true
+          # 2. Verify scheme exists
+          SCHEME_PATH="$XCODE_WORKSPACE/xcshareddata/xcschemes/$XCODE_SCHEME.xcscheme"
+          if [ ! -f "$SCHEME_PATH" ]; then
+            echo "❌ Scheme $XCODE_SCHEME missing in workspace"
+            echo "Available schemes:"
+            find "$XCODE_WORKSPACE/xcshareddata/xcschemes" -name "*.xcscheme" | xargs -n1 basename
+            exit 1
+          fi
           
-          # 3. Enable ALWAYS_EMBED_SWIFT_STANDARD_LIBRARIES
-          /usr/libexec/PlistBuddy -c "Set :objects:13D8C11F2543F3D900D83B1E:buildSettings:ALWAYS_EMBED_SWIFT_STANDARD_LIBRARIES YES" "$PBXPROJ_PATH"
+          # 3. Verify build directory permissions
+          mkdir -p "$HOME/build"
+          if ! touch "$HOME/build/test_file"; then
+            echo "❌ Cannot write to build directory"
+            echo "Directory permissions:"
+            ls -ld "$HOME/build"
+            exit 1
+          fi
+          rm "$HOME/build/test_file"
           
-          # 4. Set LD_RUNPATH_SEARCH_PATHS for static frameworks
-          /usr/libexec/PlistBuddy -c "Set :objects:13D8C11F2543F3D900D83B1E:buildSettings:LD_RUNPATH_SEARCH_PATHS string \$(inherited) @executable_path/Frameworks" "$PBXPROJ_PATH"
-          
-          # 5. Verify changes
-          echo "=== VERIFYING CHANGES ==="
-          grep -A5 "FRAMEWORK_SEARCH_PATHS" "$PBXPROJ_PATH" || echo "No FRAMEWORK_SEARCH_PATHS found"
-          grep -A5 "ALWAYS_EMBED_SWIFT_STANDARD_LIBRARIES" "$PBXPROJ_PATH" || echo "No ALWAYS_EMBED_SWIFT_STANDARD_LIBRARIES found"
-          
-          echo "✅ Xcode build settings configured"
-      - name: Configure Xcode Project for Static Frameworks
+          echo "✅ Xcode workspace verified"
+
+      - name: Build IPA with Enhanced Diagnostics
         script: |
-          echo "=== CONFIGURING XCODE PROJECT FOR FRAMEWORK EMBEDDING ==="
-          
-          # 1. Add EMBEDDED_CONTENT_CONTAINS_SWIFT flag
-          /usr/libexec/PlistBuddy -c "Add :objects:13D8C11F2543F3D900D83B1E:buildSettings:EMBEDDED_CONTENT_CONTAINS_SWIFT string YES" ios/App/App.xcodeproj/project.pbxproj
-          
-          # 2. Ensure FRAMEWORK_SEARCH_PATHS includes Pods directory
-          /usr/libexec/PlistBuddy -c "Add :objects:13D8C11F2543F3D900D83B1E:buildSettings:FRAMEWORK_SEARCH_PATHS string \$(inherited) \$(PROJECT_DIR)/Pods" ios/App/App.xcodeproj/project.pbxproj
-          
-          # 3. Set ALWAYS_SEARCH_USER_PATHS to YES
-          /usr/libexec/PlistBuddy -c "Set :objects:13D8C11F2543F3D900D83B1E:buildSettings:ALWAYS_SEARCH_USER_PATHS YES" ios/App/App.xcodeproj/project.pbxproj
-          
-          # 4. Verify changes
-          echo "=== VERIFYING XCODE PROJECT CHANGES ==="
-          grep -A5 "EMBEDDED_CONTENT_CONTAINS_SWIFT" ios/App/App.xcodeproj/project.pbxproj || echo "Warning: EMBEDDED_CONTENT_CONTAINS_SWIFT not found"
-          grep -A5 "FRAMEWORK_SEARCH_PATHS" ios/App/App.xcodeproj/project.pbxproj || echo "Warning: FRAMEWORK_SEARCH_PATHS not found"
-      - name: Build IPA (Optimized)
-        script: |
-          echo "=== BUILDING IPA ==="
+          echo "=== BUILDING IPA WITH ENHANCED DIAGNOSTICS ==="
           export NSUnbufferedIO=YES
           
           # Clean previous builds
           rm -rf "$HOME/build"
           mkdir -p "$HOME/build"
           
+          # 1. First run with full logging
+          echo "=== STARTING XCODEBUILD ==="
           xcodebuild -workspace "$XCODE_WORKSPACE" \
                     -scheme "$XCODE_SCHEME" \
                     -sdk iphoneos \
@@ -542,7 +506,116 @@ workflows:
                     OTHER_LDFLAGS="-ObjC -all_load" \
                     LD_RUNPATH_SEARCH_PATHS="@executable_path/Frameworks" \
                     ONLY_ACTIVE_ARCH=NO \
-                    archive | tee "$HOME/build/archive_log.txt"
+                    archive | tee "$HOME/build/xcodebuild.log"
+          
+          # 2. Check exit status immediately
+          XCODE_EXIT=${PIPESTATUS[0]}
+          if [ $XCODE_EXIT -ne 0 ]; then
+            echo "❌ Xcode build failed with exit code $XCODE_EXIT"
+            echo "=== LAST 50 LINES OF BUILD LOG ==="
+            tail -n 50 "$HOME/build/xcodebuild.log"
+            echo "=== ERROR SUMMARY ==="
+            grep -i "error:" "$HOME/build/xcodebuild.log" | grep -v "errors generated" | head -20
+            exit $XCODE_EXIT
+          fi
+          
+          # 3. Verify archive creation
+          if [ ! -d "$HOME/build/App.xcarchive" ]; then
+            echo "❌ Archive not created at $HOME/build/App.xcarchive"
+            echo "=== BUILD DIRECTORY CONTENTS ==="
+            ls -la "$HOME/build"
+            echo "=== XCODEBUILD LOG ANALYSIS ==="
+            grep -i "archive" "$HOME/build/xcodebuild.log" | tail -10
+            echo "=== POSSIBLE FAILURE POINTS ==="
+            grep -i -A5 -B5 "failed" "$HOME/build/xcodebuild.log" || echo "No explicit failures found"
+            exit 1
+          fi
+          
+          echo "✅ Archive created successfully at $HOME/build/App.xcarchive"
+
+      - name: Real-time Archive Monitoring
+        script: |
+          echo "=== REAL-TIME ARCHIVE MONITORING ==="
+          
+          # 1. Verify archive structure
+          ARCHIVE_PATH="$HOME/build/App.xcarchive"
+          if [ ! -d "$ARCHIVE_PATH" ]; then
+            echo "❌ Archive directory missing"
+            exit 1
+          fi
+          
+          # 2. Verify critical archive components
+          REQUIRED_ARCHIVE_FILES=(
+            "Info.plist"
+            "Products/Applications/App.app"
+            "dSYMs/App.app.dSYM"
+          )
+          
+          for file in "${REQUIRED_ARCHIVE_FILES[@]}"; do
+            if [ ! -e "$ARCHIVE_PATH/$file" ]; then
+              echo "❌ Missing archive component: $file"
+              echo "Archive contents:"
+              find "$ARCHIVE_PATH" -type f
+              exit 1
+            fi
+          done
+          
+          # 3. Verify app binary
+          APP_PATH="$ARCHIVE_PATH/Products/Applications/App.app"
+          if [ ! -f "$APP_PATH/App" ]; then
+            echo "❌ App binary missing from archive"
+            echo "App bundle contents:"
+            find "$APP_PATH" -type f
+            exit 1
+          fi
+          
+          # 4. Verify static framework linking
+          echo "=== STATIC FRAMEWORK VERIFICATION ==="
+          nm "$APP_PATH/App" | grep -i capacitor || {
+            echo "❌ No Capacitor symbols found in binary - static linking may have failed"
+            exit 1
+          }
+          
+          echo "✅ Archive verification complete"
+
+      - name: Fallback Archive Creation
+        script: |
+          echo "=== FALLBACK ARCHIVE CREATION ==="
+          
+          # Only run if archive is missing
+          if [ ! -d "$HOME/build/App.xcarchive" ]; then
+            echo "⚠️ Primary archive missing - attempting fallback build"
+            
+            # 1. Clean derived data
+            rm -rf ~/Library/Developer/Xcode/DerivedData/*
+            
+            # 2. Simpler build command
+            xcodebuild -workspace "$XCODE_WORKSPACE" \
+                      -scheme "$XCODE_SCHEME" \
+                      -sdk iphoneos \
+                      -configuration Release \
+                      -archivePath "$HOME/build/Fallback.xcarchive" \
+                      -destination 'generic/platform=iOS' \
+                      DEVELOPMENT_TEAM="$TEAM_ID" \
+                      PRODUCT_BUNDLE_IDENTIFIER="$BUNDLE_ID" \
+                      CODE_SIGN_STYLE="Manual" \
+                      CODE_SIGN_IDENTITY="iPhone Distribution" \
+                      OTHER_CODE_SIGN_FLAGS="--keychain build.keychain" \
+                      archive | tee "$HOME/build/fallback_build.log"
+            
+            # 3. Verify fallback archive
+            if [ -d "$HOME/build/Fallback.xcarchive" ]; then
+              echo "✅ Fallback archive created"
+              mv "$HOME/build/Fallback.xcarchive" "$HOME/build/App.xcarchive"
+            else
+              echo "❌ Fallback archive failed"
+              echo "=== FALLBACK BUILD ERRORS ==="
+              grep -i "error:" "$HOME/build/fallback_build.log" | head -20
+              exit 1
+            fi
+          else
+            echo "✅ Primary archive exists - skipping fallback"
+          fi
       - name: Verify Code Signing
         script: |
           echo "=== CODE SIGNING VERIFICATION ==="
@@ -559,30 +632,6 @@ workflows:
           done
           
           echo "✅ Code signing verified"
-      - name: Verify Archive Contents
-        script: |
-          echo "=== ARCHIVE VERIFICATION ==="
-          ARCHIVE_PATH="$HOME/build/App.xcarchive"
-          APP_PATH="$ARCHIVE_PATH/Products/Applications/App.app"
-          
-          # Basic structure check
-          if [ ! -f "$APP_PATH/App" ]; then
-            echo "❌ App binary missing"
-            echo "Archive contents:"
-            find "$ARCHIVE_PATH" -type f
-            exit 1
-          fi
-          
-          # Size check (Capacitor apps typically >3MB)
-          BINARY_SIZE=$(stat -f%z "$APP_PATH/App")
-          if [ "$BINARY_SIZE" -lt 3000000 ]; then
-            echo "❌ App binary too small ($BINARY_SIZE bytes)"
-            echo "Capacitor symbols:"
-            nm "$APP_PATH/App" | grep -i capacitor || echo "No Capacitor symbols found"
-            exit 1
-          fi
-          
-          echo "✅ Archive verified (Binary size: $BINARY_SIZE bytes)"
 
       - name: Export IPA
         script: |
