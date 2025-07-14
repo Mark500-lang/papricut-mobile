@@ -187,11 +187,26 @@ workflows:
           echo "Running pod install..."
           cd ios/App && pod install --repo-update && cd ../..
           
-          # Verify Pods were installed
+          # Verify Pods were installed (more accurate check)
           if [ ! -d "ios/App/Pods/Capacitor" ]; then
-            echo "❌ Pod installation failed"
+            echo "❌ Pod installation failed - Capacitor not found"
             exit 1
           fi
+          
+          # Check for other critical pods if needed
+          REQUIRED_PODS=(
+            "CapacitorCordova"
+            "CapacitorCamera"
+          )
+          
+          for pod in "${REQUIRED_PODS[@]}"; do
+            if [ ! -d "ios/App/Pods/$pod" ]; then
+              echo "❌ Missing pod: $pod"
+              exit 1
+            fi
+          done
+          
+          echo "✅ Pod installation verified"
       - name: Verify iOS Platform
         script: |
           echo "=== IOS PLATFORM CHECK ==="
