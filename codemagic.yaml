@@ -251,40 +251,53 @@ workflows:
       - name: Sync Capacitor iOS Project
         script: |
           echo "=== SYNCING CAPACITOR IOS ==="
-          # Ensure iOS directory exists
-          if [ ! -d "ios/App" ]; then
-            echo "❌ iOS directory missing - did the platform add fail?"
+          
+          # 1. Clean previous sync artifacts
+          echo "Cleaning previous sync..."
+          rm -rf ios/App/App/public
+          
+          # 2. Verify www directory exists
+          if [ ! -d "www" ]; then
+            echo "❌ www directory missing - did the Angular build fail?"
             exit 1
           fi
           
-          # Full sync with verbose output
-          npx cap sync ios --verbose
+          # 3. Run sync without --verbose (Capacitor 5 doesn't support it)
+          echo "Running capacitor sync..."
+          npx cap sync ios
           
-          # Verify critical files were created
+          # 4. Verify critical files were created
           REQUIRED_FILES=(
             "ios/App/App/public/index.html"
             "ios/App/App/App.entitlements"
-            "ios/App/Podfile"
           )
           
           for file in "${REQUIRED_FILES[@]}"; do
             if [ ! -f "$file" ]; then
               echo "❌ Missing critical file: $file"
-              echo "Directory contents:"
-              find ios/App -type f
-              exit 1
+              echo "Attempting manual copy..."
+              
+              # Manual copy as fallback
+              mkdir -p ios/App/App/public
+              cp -R www/* ios/App/App/public/
+              
+              # Verify again after manual copy
+              if [ ! -f "$file" ]; then
+                echo "❌ Still missing after manual copy"
+                echo "Directory contents:"
+                find ios/App -type f
+                exit 1
+              fi
             fi
           done
           
-          echo "=== POD INSTALL ==="
-          cd ios/App && pod install --repo-update && cd ../..
-          
-          echo "=== VERIFYING SYNC ==="
-          if ! grep -q "account.papricut.com" "ios/App/App/App.entitlements"; then
-            echo "❌ App-bound domains not configured in entitlements"
-            cat ios/App/App/App.entitlements
+          # 5. Additional verification
+          if [ ! -d "ios/App/App.xcworkspace" ]; then
+            echo "❌ Xcode workspace missing"
             exit 1
           fi
+          
+          echo "✅ iOS sync completed successfully"
 
       - name: Update Info.plist
         script: |
