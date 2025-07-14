@@ -331,8 +331,44 @@ workflows:
 
       - name: Decode Signing Assets
         script: |
-          echo "$DISTRIBUTION_CERTIFICATE" | base64 --decode > signing.p12
-          echo "$PROVISIONING_PROFILE" | base64 --decode > "$PROFILE_NAME.mobileprovision"
+          echo "=== DECODING SIGNING ASSETS ==="
+          
+          # 1. Verify variables exist and aren't empty
+          if [ -z "$DISTRIBUTION_CERTIFICATE" ] || [ -z "$PROVISIONING_PROFILE" ]; then
+            echo "❌ Missing signing assets - check your environment variables"
+            exit 1
+          fi
+
+          # 2. Clean any existing files
+          rm -f signing.p12 "$PROFILE_NAME.mobileprovision"
+
+          # 3. Decode certificate with error handling
+          echo "$DISTRIBUTION_CERTIFICATE" | base64 --decode > signing.p12 2>/tmp/base64_error
+          if [ $? -ne 0 ] || [ ! -s "signing.p12" ]; then
+            echo "❌ Failed to decode distribution certificate"
+            echo "Base64 error:"
+            cat /tmp/base64_error
+            exit 1
+          fi
+
+          # 4. Decode provisioning profile with error handling
+          echo "$PROVISIONING_PROFILE" | base64 --decode > "$PROFILE_NAME.mobileprovision" 2>/tmp/base64_error
+          if [ $? -ne 0 ] || [ ! -s "$PROFILE_NAME.mobileprovision" ]; then
+            echo "❌ Failed to decode provisioning profile"
+            echo "Base64 error:"
+            cat /tmp/base64_error
+            exit 1
+          fi
+
+          # 5. Verify decoded files
+          echo "Decoded files:"
+          ls -la signing.p12 "$PROFILE_NAME.mobileprovision"
+          echo "Certificate type:"
+          file signing.p12
+          echo "Provisioning profile content:"
+          head -n 5 "$PROFILE_NAME.mobileprovision"
+
+          echo "✅ Signing assets decoded successfully"
 
       - name: Install Provisioning Profile
         script: |
