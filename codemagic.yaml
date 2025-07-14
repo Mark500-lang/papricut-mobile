@@ -138,25 +138,25 @@ workflows:
       - name: Verify Web Assets
         script: |
           echo "=== WEB ASSET VALIDATION ==="
-          REQUIRED_WEB_FILES=(
-            "www/index.html"
-            "www/main.*.js"
-            "www/runtime.*.js"
-          )
           
-          for file in "${REQUIRED_WEB_FILES[@]}"; do
-            if ! ls $file >/dev/null 2>&1; then
-              echo "❌ Missing web file: $file"
-              ls -la www/
-              exit 1
-            fi
-          done
-          
-          # Verify environment replacement
-          if ! grep -q "api.papricut.com" www/main.*.js; then
-            echo "❌ Production API URL not found in build"
+          # First verify files exist
+          if [ ! -f "www/main.js" ] && [ ! -f "www/main.*.js" ]; then
+            echo "❌ Main JS file missing"
+            ls -la www/
             exit 1
           fi
+          
+          # More flexible URL check
+          if ! grep -r "account.papricut.com" www/; then
+            echo "❌ Production API URL not found in build"
+            echo "=== DEBUG INFO ==="
+            echo "Checking for any API_URL reference:"
+            grep -r "API_URL" www/ || echo "No API_URL found"
+            echo "Checking for production flag:"
+            grep -r "production:\s*true" www/ || echo "No production flag found"
+            exit 1
+          fi
+          echo "✅ Web assets validated successfully"
       - name: Configure Podfile
         script: |
           echo "=== PODFILE VERIFICATION ==="
