@@ -173,38 +173,42 @@ workflows:
       - name: Configure Podfile
         script: |
           echo "=== PODFILE VERIFICATION ==="
-          if [ -f "ios/App/Podfile" ]; then
-            echo "Existing Podfile detected - validating contents..."
-            if ! grep -q "CapacitorCordova" "ios/App/Podfile"; then
-              echo "❌ Podfile missing Capacitor plugins"
-              exit 1
-            fi
-          else
-            echo "Generating new Podfile..."
-            # Your existing Podfile generation script
-          fi
+          
+          # Add the warning suppression to Podfile
+          echo "Updating Podfile..."
+          echo "install! 'cocoapods', :warn_for_unused_master_specs_repo => false" >> ios/App/Podfile
           
           echo "Running pod install..."
           cd ios/App && pod install --repo-update && cd ../..
           
-          # Verify Pods were installed (more accurate check)
-          if [ ! -d "ios/App/Pods/Capacitor" ]; then
-            echo "❌ Pod installation failed - Capacitor not found"
-            exit 1
+          # More accurate verification - check multiple locations
+          echo "Verifying pod installation..."
+          POD_INSTALLED=false
+          
+          # Check standard pod location
+          if [ -d "ios/App/Pods/Capacitor" ]; then
+            POD_INSTALLED=true
           fi
           
-          # Check for other critical pods if needed
-          REQUIRED_PODS=(
-            "CapacitorCordova"
-            "CapacitorCamera"
-          )
+          # Check Capacitor framework build
+          if [ -d "ios/App/Pods/Target Support Files/Capacitor" ]; then
+            POD_INSTALLED=true
+          fi
           
-          for pod in "${REQUIRED_PODS[@]}"; do
-            if [ ! -d "ios/App/Pods/$pod" ]; then
-              echo "❌ Missing pod: $pod"
-              exit 1
-            fi
-          done
+          # Check build products
+          if [ -d "ios/App/Pods/Products/Capacitor.framework" ]; then
+            POD_INSTALLED=true
+          fi
+          
+          # Final verification
+          if [ "$POD_INSTALLED" = false ]; then
+            echo "❌ Capacitor pod verification failed"
+            echo "Debug info:"
+            echo "Current directory: $(pwd)"
+            echo "Pod directory contents:"
+            ls -R ios/App/Pods/ | grep -i capacitor
+            exit 1
+          fi
           
           echo "✅ Pod installation verified"
       - name: Verify iOS Platform

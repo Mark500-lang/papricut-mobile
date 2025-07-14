@@ -1,5 +1,8 @@
 require_relative '../../node_modules/@capacitor/ios/scripts/pods_helpers'
-
+install! 'cocoapods', 
+  :warn_for_unused_master_specs_repo => false,
+  :disable_input_output_paths => true
+  
 platform :ios, '13.0'
 # Changed to static framework linking
 use_frameworks! :linkage => :static
