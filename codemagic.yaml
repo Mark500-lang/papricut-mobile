@@ -139,23 +139,36 @@ workflows:
         script: |
           echo "=== WEB ASSET VALIDATION ==="
           
-          # First verify files exist
-          if [ ! -f "www/main.js" ] && [ ! -f "www/main.*.js" ]; then
+          # Check for main JS file (hashed version)
+          if ! ls www/main.*.js >/dev/null 2>&1; then
             echo "❌ Main JS file missing"
-            ls -la www/
+            echo "Found files:"
+            ls -la www/*.js
             exit 1
           fi
           
-          # More flexible URL check
-          if ! grep -r "account.papricut.com" www/; then
-            echo "❌ Production API URL not found in build"
-            echo "=== DEBUG INFO ==="
-            echo "Checking for any API_URL reference:"
-            grep -r "API_URL" www/ || echo "No API_URL found"
-            echo "Checking for production flag:"
-            grep -r "production:\s*true" www/ || echo "No production flag found"
+          # Check for runtime JS file (hashed version)
+          if ! ls www/runtime.*.js >/dev/null 2>&1; then
+            echo "❌ Runtime JS file missing"
             exit 1
           fi
+          
+          # Check for index.html
+          if [ ! -f "www/index.html" ]; then
+            echo "❌ Index.html missing"
+            exit 1
+          fi
+          
+          # Verify production API URL in any main JS file
+          MAIN_JS_FILE=$(ls www/main.*.js)
+          if ! grep -q "account.papricut.com" "$MAIN_JS_FILE"; then
+            echo "❌ Production API URL not found in build"
+            echo "Checking file: $MAIN_JS_FILE"
+            echo "First 50 lines:"
+            head -50 "$MAIN_JS_FILE" | grep -i -A5 -B5 "account" || echo "No account.papricut.com found"
+            exit 1
+          fi
+          
           echo "✅ Web assets validated successfully"
       - name: Configure Podfile
         script: |
