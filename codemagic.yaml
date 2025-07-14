@@ -94,17 +94,47 @@ workflows:
               exit 1
             fi
           done
+      - name: Verify Environment Files
+        script: |
+          if [ ! -f "src/environments/environment.ts" ] || [ ! -f "src/environments/environment.prod.ts" ]; then
+            echo "❌ Missing environment files!"
+            ls -la src/environments/
+            exit 1
+          fi
       - name: Build Angular App
         script: |
           echo "=== BUILDING PRODUCTION ASSETS ==="
-          ng build --configuration production --output-path www
+          
+          # First verify environment files
+          if [ ! -f "src/environments/environment.prod.ts" ]; then
+            echo "❌ Missing production environment file!"
+            exit 1
+          fi
+          
+          # Run build with verbose output
+          ng build --configuration production --output-path www --verbose
           
           if [ ! -d "www" ]; then
             echo "❌ Build failed - www directory not created"
             echo "=== BUILD DEBUG OUTPUT ==="
-            ng build --configuration production --output-path www --verbose
+            cat angular.log || echo "No angular.log found"
             exit 1
           fi
+          
+          # Verify critical files
+          REQUIRED_FILES=(
+            "www/index.html"
+            "www/main.*.js"
+            "www/runtime.*.js"
+          )
+          
+          for file in "${REQUIRED_FILES[@]}"; do
+            if ! ls $file >/dev/null 2>&1; then
+              echo "❌ Missing web file: $file"
+              ls -la www/
+              exit 1
+            fi
+          done
       - name: Verify Web Assets
         script: |
           echo "=== WEB ASSET VALIDATION ==="
@@ -370,6 +400,8 @@ workflows:
       - capacitor_sync.log
       - pod_install.log
       - node_modules_list.txt
+      - angular.log
+      - src/environments/
     publishing:
       app_store_connect:
         auth: integration
