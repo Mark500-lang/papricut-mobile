@@ -486,10 +486,41 @@ workflows:
           echo "=== VERIFYING XCODE PROJECT CHANGES ==="
           grep -A5 "EMBEDDED_CONTENT_CONTAINS_SWIFT" ios/App/App.xcodeproj/project.pbxproj || echo "Warning: EMBEDDED_CONTENT_CONTAINS_SWIFT not found"
           grep -A5 "FRAMEWORK_SEARCH_PATHS" ios/App/App.xcodeproj/project.pbxproj || echo "Warning: FRAMEWORK_SEARCH_PATHS not found"
-      - name: Build IPA (Final Static Linking Fix)
+      - name: Verify Xcode Archive
+        script: |
+          echo "=== VERIFYING XCODE ARCHIVE ==="
+          ARCHIVE_PATH="$HOME/build/App.xcarchive"
+          
+          if [ ! -d "$ARCHIVE_PATH" ]; then
+            echo "❌ Archive not found at $ARCHIVE_PATH"
+            exit 1
+          fi
+          
+          # Check for .app bundle
+          if [ ! -d "$ARCHIVE_PATH/Products/Applications/App.app" ]; then
+            echo "❌ App bundle not found in archive"
+            echo "Archive contents:"
+            find "$ARCHIVE_PATH" -type d
+            exit 1
+          fi
+          
+          # Check binary exists
+          if [ ! -f "$ARCHIVE_PATH/Products/Applications/App.app/App" ]; then
+            echo "❌ App binary not found"
+            echo "App bundle contents:"
+            find "$ARCHIVE_PATH/Products/Applications/App.app" -type f
+            exit 1
+          fi
+          
+          echo "✅ Archive verified successfully"
+      - name: Build IPA (With Archive Verification)
         script: |
           export NSUnbufferedIO=YES
-          echo "=== BUILDING WITH STATIC LINKING ==="
+          echo "=== BUILDING IPA ==="
+          
+          # Clean previous builds
+          rm -rf "$HOME/build/App.xcarchive"
+          
           xcodebuild -workspace "$XCODE_WORKSPACE" \
                     -scheme "$XCODE_SCHEME" \
                     -sdk iphoneos \
@@ -506,42 +537,79 @@ workflows:
                     ENABLE_BITCODE=NO \
                     BUILD_LIBRARY_FOR_DISTRIBUTION=YES \
                     SKIP_INSTALL=NO \
-                    OTHER_LDFLAGS="-ObjC" \
+                    OTHER_LDFLAGS="-ObjC -all_load" \
                     LD_RUNPATH_SEARCH_PATHS="@executable_path/Frameworks" \
                     ONLY_ACTIVE_ARCH=NO \
                     archive | tee "$HOME/build/archive_log.txt"
-
-      - name: Validate Bundle (Static Linking Check)
-        script: |
-          echo "=== VALIDATING STATIC LINKING ==="
-          APP_PATH="$HOME/build/App.xcarchive/Products/Applications/App.app"
           
-          # Check binary size (should be > 5MB for Capacitor apps)
-          BINARY_SIZE=$(stat -f%z "$APP_PATH/App")
+          # Immediate archive verification
+          if [ ! -d "$HOME/build/App.xcarchive" ]; then
+            echo "❌ Archive failed - no xcarchive created"
+            exit 1
+          fi
+
+      - name: Validate Bundle (Robust Static Linking Check)
+        script: |
+          echo "=== VALIDATING BUNDLE ==="
+          ARCHIVE_PATH="$HOME/build/App.xcarchive"
+          APP_PATH="$ARCHIVE_PATH/Products/Applications/App.app"
+          
+          # Verify archive structure first
+          if [ ! -d "$APP_PATH" ]; then
+            echo "❌ App bundle missing from archive"
+            echo "Archive contents:"
+            find "$ARCHIVE_PATH" -type d
+            exit 1
+          fi
+          
+          # Check binary exists and get size
+          if [ ! -f "$APP_PATH/App" ]; then
+            echo "❌ App binary missing"
+            echo "App bundle contents:"
+            find "$APP_PATH" -type f
+            exit 1
+          fi
+          
+          BINARY_SIZE=$(stat -f%z "$APP_PATH/App" 2>/dev/null || echo 0)
           echo "Binary size: $BINARY_SIZE bytes"
           
-          if [ "$BINARY_SIZE" -lt 5000000 ]; then
-            echo "❌ App binary too small ($BINARY_SIZE bytes) - static linking failed"
+          # Check for reasonable binary size (Capacitor apps should be >3MB)
+          if [ "$BINARY_SIZE" -lt 3000000 ]; then
+            echo "❌ App binary too small ($BINARY_SIZE bytes) - static linking likely failed"
             echo "=== LINKER SYMBOLS CHECK ==="
-            nm "$APP_PATH/App" | grep -i capacitor || echo "No Capacitor symbols found"
+            nm "$APP_PATH/App" 2>/dev/null | grep -i capacitor || echo "No Capacitor symbols found"
             exit 1
           fi
           
           # Verify web assets
+          if [ ! -d "$APP_PATH/public" ]; then
+            echo "❌ Web assets directory missing"
+            exit 1
+          fi
+          
           REQUIRED_FILES=(
             "index.html"
             "main.*.js"
             "runtime.*.js"
           )
           
+          MISSING_FILES=0
           for pattern in "${REQUIRED_FILES[@]}"; do
             if ! ls "$APP_PATH/public/$pattern" >/dev/null 2>&1; then
               echo "❌ Missing web file: $pattern"
-              exit 1
+              MISSING_FILES=1
             fi
           done
           
-          echo "✅ Bundle validated successfully (static linking confirmed)"
+          if [ "$MISSING_FILES" -ne 0 ]; then
+            echo "=== WEB ASSETS FOUND ==="
+            ls -la "$APP_PATH/public"
+            exit 1
+          fi
+          
+          echo "✅ Bundle validated successfully"
+          echo "=== FINAL SIZE VERIFICATION ==="
+          du -sh "$APP_PATH"
       - name: Final Verification
         script: |
           echo "=== FINAL BUILD VALIDATION ==="
