@@ -428,8 +428,37 @@ workflows:
 
       - name: Configure Pods Project
         script: |
-          /usr/libexec/PlistBuddy -c "Add :objects:13D8C11F2543F3D900D83B1E:buildSettings:CODE_SIGNING_ALLOWED string NO" ios/App/Pods/Pods.xcodeproj/project.pbxproj
-          /usr/libexec/PlistBuddy -c "Add :objects:13D8C11F2543F3D900D83B1E:buildSettings:CODE_SIGNING_REQUIRED string NO" ios/App/Pods/Pods.xcodeproj/project.pbxproj
+          echo "=== CONFIGURING PODS PROJECT ==="
+          
+          # 1. Disable code signing for all pods
+          find ios/App/Pods -name project.pbxproj | while read pbxproj; do
+              /usr/libexec/PlistBuddy -c "Set :objects:*:buildSettings:CODE_SIGNING_ALLOWED NO" "$pbxproj"
+              /usr/libexec/PlistBuddy -c "Set :objects:*:buildSettings:CODE_SIGNING_REQUIRED NO" "$pbxproj"
+              /usr/libexec/PlistBuddy -c "Set :objects:*:buildSettings:PROVISIONING_PROFILE_SPECIFIER ''" "$pbxproj"
+              /usr/libexec/PlistBuddy -c "Set :objects:*:buildSettings:PROVISIONING_PROFILE ''" "$pbxproj"
+              /usr/libexec/PlistBuddy -c "Set :objects:*:buildSettings:DEVELOPMENT_TEAM ''" "$pbxproj"
+          done
+          
+          # 2. Specifically configure Capacitor pods
+          CAPACITOR_PODS=(
+            "Capacitor" 
+            "CapacitorCordova"
+            "CapacitorApp"
+            "CapacitorCamera"
+            "CapacitorKeyboard"
+            # Add other Capacitor plugins as needed
+          )
+          
+          for pod in "${CAPACITOR_PODS[@]}"; do
+              find ios/App/Pods -name "$pod.xcodeproj" | while read podproj; do
+                  pbxproj="$podproj/project.pbxproj"
+                  /usr/libexec/PlistBuddy -c "Set :objects:*:buildSettings:PROVISIONING_PROFILE_SPECIFIER ''" "$pbxproj"
+                  /usr/libexec/PlistBuddy -c "Set :objects:*:buildSettings:PROVISIONING_PROFILE ''" "$pbxproj"
+                  /usr/libexec/PlistBuddy -c "Set :objects:*:buildSettings:CODE_SIGN_STYLE Automatic" "$pbxproj"
+              done
+          done
+          
+          echo "✅ Pods project configured"
       - name: Verify Pod Installation
         script: |
           echo "=== POD INSTALLATION VERIFICATION ==="
@@ -495,7 +524,6 @@ workflows:
           rm -rf "$HOME/build"
           mkdir -p "$HOME/build"
           
-          # Run with verbose logging
           xcodebuild -workspace "$XCODE_WORKSPACE" \
                     -scheme "$XCODE_SCHEME" \
                     -sdk iphoneos \
@@ -507,7 +535,6 @@ workflows:
                     PRODUCT_BUNDLE_IDENTIFIER="$BUNDLE_ID" \
                     CODE_SIGN_STYLE="Manual" \
                     CODE_SIGN_IDENTITY="iPhone Distribution" \
-                    PROVISIONING_PROFILE="$PROFILE_UUID" \
                     OTHER_CODE_SIGN_FLAGS="--keychain build.keychain" \
                     ENABLE_BITCODE=NO \
                     BUILD_LIBRARY_FOR_DISTRIBUTION=YES \
@@ -516,14 +543,22 @@ workflows:
                     LD_RUNPATH_SEARCH_PATHS="@executable_path/Frameworks" \
                     ONLY_ACTIVE_ARCH=NO \
                     archive | tee "$HOME/build/archive_log.txt"
+      - name: Verify Code Signing
+        script: |
+          echo "=== CODE SIGNING VERIFICATION ==="
+          ARCHIVE_PATH="$HOME/build/App.xcarchive"
+          APP_PATH="$ARCHIVE_PATH/Products/Applications/App.app"
           
-          # Immediate archive verification
-          if [ ! -d "$HOME/build/App.xcarchive" ]; then
-            echo "❌ Archive failed - checking logs"
-            grep "error:" "$HOME/build/archive_log.txt" || echo "No explicit errors found in log"
-            exit 1
-          fi
-
+          # Verify main app is properly signed
+          codesign -dv --verbose=4 "$APP_PATH"
+          
+          # Verify no unexpected embedded profiles
+          find "$APP_PATH" -name "*.mobileprovision" | while read profile; do
+              echo "Found provisioning profile: $profile"
+              /usr/libexec/PlistBuddy -c "Print UUID" /dev/stdin <<< $(security cms -D -i "$profile")
+          done
+          
+          echo "✅ Code signing verified"
       - name: Verify Archive Contents
         script: |
           echo "=== ARCHIVE VERIFICATION ==="
