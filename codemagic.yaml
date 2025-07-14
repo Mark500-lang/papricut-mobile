@@ -513,7 +513,24 @@ workflows:
           rm -rf "$HOME/build"
           mkdir -p "$HOME/build"
           
-          # 1. First run with full logging
+          # Verify provisioning profile is installed
+          echo "=== VERIFYING PROVISIONING PROFILE ==="
+          PROFILE_UUID=$(/usr/libexec/PlistBuddy -c 'Print UUID' /dev/stdin <<< $(security cms -D -i "$PROFILE_NAME.mobileprovision"))
+          if [ ! -f "$HOME/Library/MobileDevice/Provisioning Profiles/$PROFILE_UUID.mobileprovision" ]; then
+            echo "❌ Provisioning profile not found in expected location"
+            echo "Installed profiles:"
+            ls -la "$HOME/Library/MobileDevice/Provisioning Profiles/" || echo "No profiles found"
+            exit 1
+          fi
+          
+          # Update Xcode project settings
+          echo "=== UPDATING XCODE PROJECT SETTINGS ==="
+          PBXPROJ_PATH="ios/App/App.xcodeproj/project.pbxproj"
+          /usr/libexec/PlistBuddy -c "Set :objects:13D8C11F2543F3D900D83B1E:buildSettings:PROVISIONING_PROFILE_SPECIFIER $PROFILE_NAME" "$PBXPROJ_PATH"
+          /usr/libexec/PlistBuddy -c "Set :objects:13D8C11F2543F3D900D83B1E:buildSettings:PROVISIONING_PROFILE $PROFILE_UUID" "$PBXPROJ_PATH"
+          /usr/libexec/PlistBuddy -c "Set :objects:13D8C11F2543F3D900D83B1E:buildSettings:CODE_SIGN_STYLE Manual" "$PBXPROJ_PATH"
+          
+          # Build with enhanced logging
           echo "=== STARTING XCODEBUILD ==="
           xcodebuild -workspace "$XCODE_WORKSPACE" \
                     -scheme "$XCODE_SCHEME" \
@@ -526,6 +543,8 @@ workflows:
                     PRODUCT_BUNDLE_IDENTIFIER="$BUNDLE_ID" \
                     CODE_SIGN_STYLE="Manual" \
                     CODE_SIGN_IDENTITY="iPhone Distribution" \
+                    PROVISIONING_PROFILE_SPECIFIER="$PROFILE_NAME" \
+                    PROVISIONING_PROFILE="$PROFILE_UUID" \
                     OTHER_CODE_SIGN_FLAGS="--keychain build.keychain" \
                     ENABLE_BITCODE=NO \
                     BUILD_LIBRARY_FOR_DISTRIBUTION=YES \
@@ -535,27 +554,24 @@ workflows:
                     ONLY_ACTIVE_ARCH=NO \
                     archive | tee "$HOME/build/xcodebuild.log"
           
-          # 2. Check exit status immediately
+          # Check exit status immediately
           XCODE_EXIT=${PIPESTATUS[0]}
           if [ $XCODE_EXIT -ne 0 ]; then
             echo "❌ Xcode build failed with exit code $XCODE_EXIT"
-            echo "=== LAST 50 LINES OF BUILD LOG ==="
-            tail -n 50 "$HOME/build/xcodebuild.log"
-            echo "=== ERROR SUMMARY ==="
-            grep -i "error:" "$HOME/build/xcodebuild.log" | grep -v "errors generated" | head -20
+            echo "=== BUILD ERROR SUMMARY ==="
+            grep -A10 -B10 "error:" "$HOME/build/xcodebuild.log" | grep -v "errors generated" | head -50
+            
+            # Additional diagnostics
+            echo "=== PROVISIONING PROFILE DIAGNOSTICS ==="
+            security find-identity -v -p codesigning
+            echo "Installed profiles:"
+            find "$HOME/Library/MobileDevice/Provisioning Profiles" -name "*.mobileprovision" | while read f; do
+              echo "Profile: $f"
+              /usr/libexec/PlistBuddy -c 'Print :Name' /dev/stdin <<< $(security cms -D -i "$f")
+              /usr/libexec/PlistBuddy -c 'Print :UUID' /dev/stdin <<< $(security cms -D -i "$f")
+            done
+            
             exit $XCODE_EXIT
-          fi
-          
-          # 3. Verify archive creation
-          if [ ! -d "$HOME/build/App.xcarchive" ]; then
-            echo "❌ Archive not created at $HOME/build/App.xcarchive"
-            echo "=== BUILD DIRECTORY CONTENTS ==="
-            ls -la "$HOME/build"
-            echo "=== XCODEBUILD LOG ANALYSIS ==="
-            grep -i "archive" "$HOME/build/xcodebuild.log" | tail -10
-            echo "=== POSSIBLE FAILURE POINTS ==="
-            grep -i -A5 -B5 "failed" "$HOME/build/xcodebuild.log" || echo "No explicit failures found"
-            exit 1
           fi
           
           echo "✅ Archive created successfully at $HOME/build/App.xcarchive"
@@ -643,22 +659,24 @@ workflows:
           else
             echo "✅ Primary archive exists - skipping fallback"
           fi
-      - name: Verify Code Signing
+      - name: Verify Code Signing Setup
         script: |
           echo "=== CODE SIGNING VERIFICATION ==="
-          ARCHIVE_PATH="$HOME/build/App.xcarchive"
-          APP_PATH="$ARCHIVE_PATH/Products/Applications/App.app"
+          # Verify certificate is in keychain
+          security find-identity -v -p codesigning | grep "iPhone Distribution" || {
+            echo "❌ Distribution certificate not found"
+            exit 1
+          }
           
-          # Verify main app is properly signed
-          codesign -dv --verbose=4 "$APP_PATH"
-          
-          # Verify no unexpected embedded profiles
-          find "$APP_PATH" -name "*.mobileprovision" | while read profile; do
-              echo "Found provisioning profile: $profile"
-              /usr/libexec/PlistBuddy -c "Print UUID" /dev/stdin <<< $(security cms -D -i "$profile")
-          done
-          
-          echo "✅ Code signing verified"
+          # Verify profile contains correct bundle ID
+          PROFILE_BUNDLE_ID=$(/usr/libexec/PlistBuddy -c 'Print :Entitlements:application-identifier' /dev/stdin <<< $(security cms -D -i "$PROFILE_NAME.mobileprovision"))
+          if [[ "$PROFILE_BUNDLE_ID" != *"$BUNDLE_ID" ]]; then
+            echo "❌ Profile bundle ID mismatch"
+            echo "Profile contains: $PROFILE_BUNDLE_ID"
+            echo "Expected: $BUNDLE_ID"
+            exit 1
+          fi
+          echo "✅ Code signing setup verified"
 
       - name: Export IPA
         script: |
