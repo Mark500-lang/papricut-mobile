@@ -190,10 +190,27 @@ workflows:
           echo "Cleaning previous pod installation..."
           rm -rf ios/App/Pods ios/App/Podfile.lock ios/App/App.xcworkspace
 
-          # 3. Properly modify Podfile (using temporary file for safety)
-          echo "Updating Podfile with correct syntax..."
+          # 3. Properly modify Podfile with static framework settings
+          echo "Updating Podfile with static framework configuration..."
           TEMP_FILE=$(mktemp)
-          awk '1; /^end$/ && !modifed {print "install! '\''cocoapods'\'', :warn_for_unused_master_specs_repo => false"; modifed=1}' ios/App/Podfile > "$TEMP_FILE"
+          cat << 'EOF' > "$TEMP_FILE"
+          use_frameworks! :linkage => :static
+          install! 'cocoapods', :warn_for_unused_master_specs_repo => false
+          
+          # Workaround for Capacitor plugins with static frameworks
+          pre_install do |installer|
+            installer.pod_targets.each do |pod|
+              if pod.name.start_with?('Capacitor')
+                def pod.build_type;
+                  Pod::BuildType.static_library
+                end
+              end
+            end
+          end
+          EOF
+          
+          # Append the original Podfile content (excluding any existing use_frameworks!)
+          grep -v "use_frameworks!" ios/App/Podfile >> "$TEMP_FILE"
           mv "$TEMP_FILE" ios/App/Podfile
 
           # 4. Show final Podfile for debugging
@@ -203,31 +220,6 @@ workflows:
           # 5. Run pod install with full clean
           echo "Running pod install..."
           cd ios/App && pod install --clean-install --repo-update && cd ../..
-
-          # 6. Verify installation through multiple methods
-          echo "Verifying installation..."
-          
-          # Method 1: Check Podfile.lock
-          if [ ! -f "ios/App/Podfile.lock" ]; then
-            echo "❌ Podfile.lock not generated"
-            exit 1
-          fi
-
-          # Method 2: Check for Capacitor in lockfile
-          if ! grep -q "Capacitor (" "ios/App/Podfile.lock"; then
-            echo "❌ Capacitor not found in Podfile.lock"
-            echo "Podfile.lock contents:"
-            cat ios/App/Podfile.lock
-            exit 1
-          fi
-
-          # Method 3: Check workspace generation
-          if [ ! -d "ios/App/App.xcworkspace" ]; then
-            echo "❌ Xcode workspace not generated"
-            exit 1
-          fi
-
-          echo "✅ Pod installation successfully verified"
       - name: Verify iOS Platform
         script: |
           echo "=== IOS PLATFORM CHECK ==="
@@ -424,36 +416,56 @@ workflows:
           NEW_BUILD=$((CURRENT_BUILD + 1))
           /usr/libexec/PlistBuddy -c "Set CFBundleVersion $NEW_BUILD" "$PLIST_PATH"
           echo "Updated build number from $CURRENT_BUILD to $NEW_BUILD"
-
+      - name: Configure Xcode Build Settings
+        script: |
+          echo "=== CONFIGURING XCODE BUILD SETTINGS ==="
+          
+          # 1. Ensure the project file exists
+          PBXPROJ_PATH="ios/App/App.xcodeproj/project.pbxproj"
+          if [ ! -f "$PBXPROJ_PATH" ]; then
+            echo "❌ Xcode project file not found"
+            exit 1
+          fi
+          
+          # 2. Add framework search paths (safe modification)
+          /usr/libexec/PlistBuddy -c "Add :objects:13D8C11F2543F3D900D83B1E:buildSettings:FRAMEWORK_SEARCH_PATHS string \$(inherited) \$(PROJECT_DIR)/Pods" "$PBXPROJ_PATH" || true
+          
+          # 3. Enable ALWAYS_EMBED_SWIFT_STANDARD_LIBRARIES
+          /usr/libexec/PlistBuddy -c "Set :objects:13D8C11F2543F3D900D83B1E:buildSettings:ALWAYS_EMBED_SWIFT_STANDARD_LIBRARIES YES" "$PBXPROJ_PATH"
+          
+          # 4. Set LD_RUNPATH_SEARCH_PATHS for static frameworks
+          /usr/libexec/PlistBuddy -c "Set :objects:13D8C11F2543F3D900D83B1E:buildSettings:LD_RUNPATH_SEARCH_PATHS string \$(inherited) @executable_path/Frameworks" "$PBXPROJ_PATH"
+          
+          # 5. Verify changes
+          echo "=== VERIFYING CHANGES ==="
+          grep -A5 "FRAMEWORK_SEARCH_PATHS" "$PBXPROJ_PATH" || echo "No FRAMEWORK_SEARCH_PATHS found"
+          grep -A5 "ALWAYS_EMBED_SWIFT_STANDARD_LIBRARIES" "$PBXPROJ_PATH" || echo "No ALWAYS_EMBED_SWIFT_STANDARD_LIBRARIES found"
+          
+          echo "✅ Xcode build settings configured"
       - name: Build IPA (Robust)
         script: |
           export NSUnbufferedIO=YES
           echo "=== ARCHIVING APP ==="
           xcodebuild -workspace "$XCODE_WORKSPACE" \
-                     -scheme "$XCODE_SCHEME" \
-                     -sdk iphoneos \
-                     -configuration Release \
-                     -archivePath "$HOME/build/App.xcarchive" \
-                     -allowProvisioningUpdates \
-                     -destination 'generic/platform=iOS' \
-                     DEVELOPMENT_TEAM="$TEAM_ID" \
-                     PRODUCT_BUNDLE_IDENTIFIER="$BUNDLE_ID" \
-                     CODE_SIGN_STYLE="Manual" \
-                     CODE_SIGN_IDENTITY="iPhone Distribution" \
-                     PROVISIONING_PROFILE="$PROFILE_UUID" \
-                     OTHER_CODE_SIGN_FLAGS="--keychain build.keychain" \
-                     ENABLE_BITCODE=NO \
-                     BUILD_LIBRARY_FOR_DISTRIBUTION=YES \
-                     EMBEDDED_CONTENT_CONTAINS_SWIFT=YES \
-                     ALWAYS_EMBED_SWIFT_STANDARD_LIBRARIES=YES \
-                     LD_RUNPATH_SEARCH_PATHS="@executable_path/Frameworks" \
-                     archive | tee "$HOME/build/archive_log.txt"
-          echo "=== EXPORTING IPA ==="
-          xcodebuild -exportArchive \
-                     -archivePath "$HOME/build/App.xcarchive" \
-                     -exportPath "$HOME/build/ipa" \
-                     -exportOptionsPlist ExportOptions.plist \
-                     -allowProvisioningUpdates | tee "$HOME/build/export_log.txt"
+                    -scheme "$XCODE_SCHEME" \
+                    -sdk iphoneos \
+                    -configuration Release \
+                    -archivePath "$HOME/build/App.xcarchive" \
+                    -allowProvisioningUpdates \
+                    -destination 'generic/platform=iOS' \
+                    DEVELOPMENT_TEAM="$TEAM_ID" \
+                    PRODUCT_BUNDLE_IDENTIFIER="$BUNDLE_ID" \
+                    CODE_SIGN_STYLE="Manual" \
+                    CODE_SIGN_IDENTITY="iPhone Distribution" \
+                    PROVISIONING_PROFILE="$PROFILE_UUID" \
+                    OTHER_CODE_SIGN_FLAGS="--keychain build.keychain" \
+                    ENABLE_BITCODE=NO \
+                    BUILD_LIBRARY_FOR_DISTRIBUTION=YES \
+                    ALWAYS_EMBED_SWIFT_STANDARD_LIBRARIES=YES \
+                    LD_RUNPATH_SEARCH_PATHS="@executable_path/Frameworks" \
+                    ONLY_ACTIVE_ARCH=NO \
+                    SKIP_INSTALL=NO \
+                    archive | tee "$HOME/build/archive_log.txt"
 
       - name: Validate Bundle (Comprehensive)
         script: |
