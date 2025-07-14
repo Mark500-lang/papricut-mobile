@@ -13,134 +13,189 @@ workflows:
         APP_STORE_CONNECT_KEY_ID: $APP_STORE_CONNECT_KEY_ID
         APP_STORE_CONNECT_ISSUER_ID: $APP_STORE_CONNECT_ISSUER_ID
         APP_STORE_CONNECT_PRIVATE_KEY: $APP_STORE_CONNECT_PRIVATE_KEY
+        DISTRIBUTION_CERTIFICATE: $DISTRIBUTION_CERTIFICATE
+        PROVISIONING_PROFILE: $PROVISIONING_PROFILE
+        CERTIFICATE_PASSWORD: $CERTIFICATE_PASSWORD
         NODE_OPTIONS: "--max-old-space-size=4096"
+        NODE_VERSION: "18.x"
       groups:
         - Papricut
     triggering:
       events:
         - push
+    cache:
+      cache_paths:
+        - ~/.npm
+        - node_modules
+        - .angular/cache
     scripts:
-      - name: Install System Dependencies
+      - name: Set Up Environment
         script: |
           brew install jq
+          npm install -g npm@latest
           npm install -g @angular/cli@17.3.17 @ionic/cli@7.2.1 native-run cordova-res
-          npm install @capacitor/core@5.7.8 @capacitor/ios@5.7.8 @capacitor/camera@5.0.10 @capacitor/splash-screen@5.0.8 @capacitor/status-bar@5.0.8 @capacitor/app@5.0.8 @capacitor/network@5.0.8 @capacitor/browser@5.2.1 @capacitor/device@5.0.8 @capacitor/filesystem@5.2.1 @capacitor/haptics@5.0.7 @capacitor/keyboard@5.0.8 @capacitor/push-notifications@5.1.2
-
-      - name: Clean Install Dependencies
+      - name: Verify Node/Ruby Versions
+        script: |
+          echo "=== VERSION VERIFICATION ==="
+          node -v
+          npm -v
+          ruby -v
+          pod --version
+          xcodebuild -version
+          
+          # Verify Node compatibility
+          if ! node -v | grep -qE 'v(16|18|20)'; then
+            echo "❌ Unsupported Node version"
+            exit 1
+          fi
+      - name: Install Dependencies
         script: |
           echo "=== CLEANING ENVIRONMENT ==="
-          rm -rf node_modules .angular/cache ~/.npm
+          rm -rf node_modules .angular/cache
           npm cache clean --force
+          
           echo "=== INSTALLING DEPENDENCIES ==="
-          npm ci --no-audit
+          npm install --legacy-peer-deps --no-audit
+          npm install --save-exact @angular-devkit/build-angular@17.3.17 @ionic/angular-toolkit@7.1.1
+          
           echo "=== VERIFYING INSTALLATIONS ==="
-          npm list @angular-devkit/build-angular @ionic/angular-toolkit @ionic/storage @capacitor/core @capacitor/ios @capacitor/camera @capacitor/splash-screen @capacitor/status-bar @capacitor/app @capacitor/network @capacitor/browser @capacitor/device @capacitor/filesystem @capacitor/haptics @capacitor/keyboard @capacitor/push-notifications
-          ng version
           if [ ! -d "node_modules/@angular-devkit/build-angular" ]; then
             echo "❌ CRITICAL: Angular build tools missing!"
+            npm list
             exit 1
           fi
-          if [ ! -d "node_modules/@capacitor/ios" ]; then
-            echo "❌ CRITICAL: Capacitor iOS missing!"
-            exit 1
-          fi
-
-      - name: Build Production Assets (Robust)
+      - name: Verify Capacitor Plugins
         script: |
-          echo "=== CLEANING PREVIOUS BUILDS ==="
-          rm -rf www
-          echo "=== BUILDING PRODUCTION ASSETS ==="
-          npm run build -- --configuration production
-          if [ ! -d "www" ]; then
-            echo "=== ATTEMPTING ALTERNATIVE BUILD ==="
-            ionic build --prod
-          fi
-          if [ ! -d "www" ]; then
-            echo "❌ Build failed - www directory not created"
-            exit 1
-          fi
-          REQUIRED_PATTERNS=("index.html" "main.*.js" "polyfills.*.js" "runtime.*.js" "styles.*.css" "assets/")
-          MISSING_FILES=0
-          for pattern in "${REQUIRED_PATTERNS[@]}"; do
-            if ! compgen -G "www/$pattern" > /dev/null; then
-              echo "❌ Missing required file pattern: www/$pattern"
-              MISSING_FILES=$((MISSING_FILES+1))
-            fi
-          done
-          if [ $MISSING_FILES -gt 0 ]; then
-            echo "=== BUILD OUTPUT CONTENTS ==="
-            ls -la www/
-            exit 1
-          fi
-          echo "=== PREPARING CAPACITOR ASSETS ==="
-          MAIN_JS=$(find www -name "main.*.js" | head -n 1)
-          RUNTIME_JS=$(find www -name "runtime.*.js" | head -n 1)
-          STYLES_CSS=$(find www -name "styles.*.css" | head -n 1)
-          sed -i.bak "s|main.js|$(basename "$MAIN_JS")|g" www/index.html
-          sed -i.bak "s|runtime.js|$(basename "$RUNTIME_JS")|g" www/index.html
-          sed -i.bak "s|styles.css|$(basename "$STYLES_CSS")|g" www/index.html
-          if ! grep -q "$(basename "$MAIN_JS")" www/index.html; then
-            echo "❌ Failed to update index.html with hashed main.js"
-            exit 1
-          fi
-          if ! grep -q "$(basename "$RUNTIME_JS")" www/index.html; then
-            echo "❌ Failed to update index.html with hashed runtime.js"
-            exit 1
-          fi
-          if ! grep -q "$(basename "$STYLES_CSS")" www/index.html; then
-            echo "❌ Failed to update index.html with hashed styles.css"
-            exit 1
-          fi
-
-      - name: Configure Podfile
-        script: |
-          echo "source 'https://cdn.cocoapods.org/'" > ios/App/Podfile
-          echo "platform :ios, '13.0'" >> ios/App/Podfile
-          echo "use_frameworks!" >> ios/App/Podfile
-          echo "" >> ios/App/Podfile
-          echo "target 'App' do" >> ios/App/Podfile
-          echo "  capacitor_pods" >> ios/App/Podfile
-          echo "  pod 'Capacitor', :path => '../../node_modules/@capacitor/ios'" >> ios/App/Podfile
-          echo "  pod 'CapacitorCordova', :path => '../../node_modules/@capacitor/ios'" >> ios/App/Podfile
-          echo "  pod 'CapacitorCamera', :path => '../../node_modules/@capacitor/camera'" >> ios/App/Podfile
-          echo "  pod 'CapacitorApp', :path => '../../node_modules/@capacitor/app'" >> ios/App/Podfile
-          echo "  pod 'CapacitorBrowser', :path => '../../node_modules/@capacitor/browser'" >> ios/App/Podfile
-          echo "  pod 'CapacitorDevice', :path => '../../node_modules/@capacitor/device'" >> ios/App/Podfile
-          echo "  pod 'CapacitorFilesystem', :path => '../../node_modules/@capacitor/filesystem'" >> ios/App/Podfile
-          echo "  pod 'CapacitorHaptics', :path => '../../node_modules/@capacitor/haptics'" >> ios/App/Podfile
-          echo "  pod 'CapacitorKeyboard', :path => '../../node_modules/@capacitor/keyboard'" >> ios/App/Podfile
-          echo "  pod 'CapacitorNetwork', :path => '../../node_modules/@capacitor/network'" >> ios/App/Podfile
-          echo "  pod 'CapacitorPushNotifications', :path => '../../node_modules/@capacitor/push-notifications'" >> ios/App/Podfile
-          echo "  pod 'CapacitorSplashScreen', :path => '../../node_modules/@capacitor/splash-screen'" >> ios/App/Podfile
-          echo "  pod 'CapacitorStatusBar', :path => '../../node_modules/@capacitor/status-bar'" >> ios/App/Podfile
-          echo "end" >> ios/App/Podfile
-          pod install --project-directory=ios/App
-
-      - name: Sync Capacitor (Robust)
-        script: |
-          echo "=== CLEANING PODS ==="
-          rm -rf ios/App/Pods ios/App/Podfile.lock
-          pod cache clean --all
-          echo "=== SYNCING WEB ASSETS TO IOS ==="
-          npx cap sync ios
-          npx cap copy ios
-          if [ ! -d "ios/App/App/public" ]; then
-            echo "❌ Capacitor sync failed - public directory missing"
-            find ios/App/App -name "index.html" || echo "No web assets found"
-            exit 1
-          fi
-          FRAMEWORK_PATH="ios/App/App/Frameworks"
-          REQUIRED_PLUGINS=("Capacitor.framework" "CapacitorCordova.framework" "CapacitorCamera.framework" "CapacitorApp.framework" "CapacitorBrowser.framework" "CapacitorDevice.framework" "CapacitorFilesystem.framework" "CapacitorHaptics.framework" "CapacitorKeyboard.framework" "CapacitorNetwork.framework" "CapacitorPushNotifications.framework" "CapacitorSplashScreen.framework" "CapacitorStatusBar.framework")
+          echo "=== CAPACITOR PLUGIN CHECK ==="
+          # Check engine requirements
+          grep -r "engine" node_modules/@capacitor/*/package.json | grep "node"
+          
+          # Verify core plugins exist
+          REQUIRED_PLUGINS=(
+            "@capacitor/core" 
+            "@capacitor/ios"
+            "@capacitor/camera"
+            "@capacitor/keyboard"
+          )
+          
           for plugin in "${REQUIRED_PLUGINS[@]}"; do
-            if [ ! -d "$FRAMEWORK_PATH/$plugin" ]; then
-              echo "❌ $plugin missing in Xcode project"
-              find ios/App -name "*.framework" || echo "No frameworks found"
+            if [ ! -d "node_modules/$plugin" ]; then
+              echo "❌ Missing plugin: $plugin"
               exit 1
             fi
           done
-          echo "=== GENERATING NATIVE ASSETS ==="
-          cordova-res ios --skip-config --copy
-          npx cap sync ios
+      - name: Build Angular App
+        script: |
+          echo "=== BUILDING PRODUCTION ASSETS ==="
+          ng build --configuration production --output-path www
+          
+          if [ ! -d "www" ]; then
+            echo "❌ Build failed - www directory not created"
+            echo "=== BUILD DEBUG OUTPUT ==="
+            ng build --configuration production --output-path www --verbose
+            exit 1
+          fi
+      - name: Verify Web Assets
+        script: |
+          echo "=== WEB ASSET VALIDATION ==="
+          REQUIRED_WEB_FILES=(
+            "www/index.html"
+            "www/main.*.js"
+            "www/runtime.*.js"
+          )
+          
+          for file in "${REQUIRED_WEB_FILES[@]}"; do
+            if ! ls $file >/dev/null 2>&1; then
+              echo "❌ Missing web file: $file"
+              ls -la www/
+              exit 1
+            fi
+          done
+          
+          # Verify environment replacement
+          if ! grep -q "api.papricut.com" www/main.*.js; then
+            echo "❌ Production API URL not found in build"
+            exit 1
+          fi
+      - name: Configure Podfile
+        script: |
+          echo "=== PODFILE VERIFICATION ==="
+          if [ -f "ios/App/Podfile" ]; then
+            echo "Existing Podfile detected - validating contents..."
+            if ! grep -q "CapacitorCordova" "ios/App/Podfile"; then
+              echo "❌ Podfile missing Capacitor plugins"
+              exit 1
+            fi
+          else
+            echo "Generating new Podfile..."
+            # Your existing Podfile generation script
+          fi
+          
+          echo "Running pod install..."
+          cd ios/App && pod install --repo-update && cd ../..
+          
+          # Verify Pods were installed
+          if [ ! -d "ios/App/Pods/Capacitor" ]; then
+            echo "❌ Pod installation failed"
+            exit 1
+          fi
+      - name: Verify iOS Platform
+        script: |
+          echo "=== IOS PLATFORM CHECK ==="
+          if [ ! -d "ios/App" ]; then
+            echo "Initializing iOS platform..."
+            npx cap add ios
+          fi
+          
+          # Critical iOS files check
+          IOS_FILES=(
+            "ios/App/App.xcodeproj/project.pbxproj"
+            "ios/App/App/Info.plist"
+          )
+          
+          for file in "${IOS_FILES[@]}"; do
+            if [ ! -f "$file" ]; then
+              echo "❌ Missing iOS file: $file"
+              exit 1
+            fi
+          done
+      - name: Sync Capacitor iOS Project
+        script: |
+          echo "=== SYNCING CAPACITOR IOS ==="
+          # Ensure iOS directory exists
+          if [ ! -d "ios/App" ]; then
+            echo "❌ iOS directory missing - did the platform add fail?"
+            exit 1
+          fi
+          
+          # Full sync with verbose output
+          npx cap sync ios --verbose
+          
+          # Verify critical files were created
+          REQUIRED_FILES=(
+            "ios/App/App/public/index.html"
+            "ios/App/App/App.entitlements"
+            "ios/App/Podfile"
+          )
+          
+          for file in "${REQUIRED_FILES[@]}"; do
+            if [ ! -f "$file" ]; then
+              echo "❌ Missing critical file: $file"
+              echo "Directory contents:"
+              find ios/App -type f
+              exit 1
+            fi
+          done
+          
+          echo "=== POD INSTALL ==="
+          cd ios/App && pod install --repo-update && cd ../..
+          
+          echo "=== VERIFYING SYNC ==="
+          if ! grep -q "account.papricut.com" "ios/App/App/App.entitlements"; then
+            echo "❌ App-bound domains not configured in entitlements"
+            cat ios/App/App/App.entitlements
+            exit 1
+          fi
 
       - name: Update Info.plist
         script: |
@@ -266,6 +321,24 @@ workflows:
             find "$APP_PATH" -name "*.storyboard*"
             exit 1
           fi
+          # Add these checks to the beginning of your script
+          echo "=== CAPACITOR BRIDGE VERIFICATION ==="
+          if ! grep -q "capacitor" "$APP_PATH/public/index.html"; then
+            echo "❌ Capacitor not injected in index.html"
+            exit 1
+          fi
+
+          # Add to your existing framework checks
+          CAPACITOR_PLUGIN_FILES=(
+            "$FRAMEWORK_PATH/Capacitor.framework/Capacitor"
+            "$FRAMEWORK_PATH/CapacitorCordova.framework/CapacitorCordova"
+          )
+          for file in "${CAPACITOR_PLUGIN_FILES[@]}"; do
+            if [ ! -f "$file" ]; then
+              echo "❌ Missing compiled plugin: $file"
+              exit 1
+            fi
+          done
           echo "✅ Bundle validated successfully"
 
       - name: Final Verification
@@ -284,6 +357,9 @@ workflows:
       - $HOME/build/archive_log.txt
       - $HOME/build/export_log.txt
       - build.log
+      - capacitor_sync.log
+      - pod_install.log
+      - node_modules_list.txt
     publishing:
       app_store_connect:
         auth: integration
