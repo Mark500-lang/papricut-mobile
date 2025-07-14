@@ -486,73 +486,84 @@ workflows:
           echo "=== VERIFYING XCODE PROJECT CHANGES ==="
           grep -A5 "EMBEDDED_CONTENT_CONTAINS_SWIFT" ios/App/App.xcodeproj/project.pbxproj || echo "Warning: EMBEDDED_CONTENT_CONTAINS_SWIFT not found"
           grep -A5 "FRAMEWORK_SEARCH_PATHS" ios/App/App.xcodeproj/project.pbxproj || echo "Warning: FRAMEWORK_SEARCH_PATHS not found"
-      - name: Verify Xcode Archive
+      - name: Build IPA (Optimized)
         script: |
-          echo "=== VERIFYING XCODE ARCHIVE ==="
-          ARCHIVE_PATH="$HOME/build/App.xcarchive"
+          echo "=== BUILDING IPA ==="
+          export NSUnbufferedIO=YES
           
-          if [ ! -d "$ARCHIVE_PATH" ]; then
-            echo "❌ Archive not found at $ARCHIVE_PATH"
-            exit 1
-          fi
-          
-          # Check for .app bundle
-          if [ ! -d "$ARCHIVE_PATH/Products/Applications/App.app" ]; then
-            echo "❌ App bundle not found in archive"
-            echo "Archive contents:"
-            find "$ARCHIVE_PATH" -type d
-            exit 1
-          fi
-          
-          # Check binary exists
-          if [ ! -f "$ARCHIVE_PATH/Products/Applications/App.app/App" ]; then
-            echo "❌ App binary not found"
-            echo "App bundle contents:"
-            find "$ARCHIVE_PATH/Products/Applications/App.app" -type f
-            exit 1
-          fi
-          
-          echo "✅ Archive verified successfully"
-      - name: Pre-Build Verification
-        script: |
-          echo "=== WORKSPACE STRUCTURE ==="
-          ls -la ios/App
-          
-          echo "=== SCHEME VERIFICATION ==="
-          xcodebuild -workspace "$XCODE_WORKSPACE" -list
-          
-          echo "=== PODS VERIFICATION ==="
-          find ios/App/Pods -name "*.a" | xargs ls -la
-      - name: Debug Build Process
-        script: |
-          echo "=== RUNNING DEBUG BUILD ==="
-          set -x  # Enable command echoing
-          
-          # First clean thoroughly
-          xcodebuild clean -workspace "$XCODE_WORKSPACE" -scheme "$XCODE_SCHEME"
+          # Clean previous builds
+          rm -rf "$HOME/build"
+          mkdir -p "$HOME/build"
           
           # Run with verbose logging
           xcodebuild -workspace "$XCODE_WORKSPACE" \
                     -scheme "$XCODE_SCHEME" \
                     -sdk iphoneos \
-                    -configuration Debug \  # Use Debug for faster builds
+                    -configuration Release \
                     -archivePath "$HOME/build/App.xcarchive" \
+                    -allowProvisioningUpdates \
                     -destination 'generic/platform=iOS' \
                     DEVELOPMENT_TEAM="$TEAM_ID" \
+                    PRODUCT_BUNDLE_IDENTIFIER="$BUNDLE_ID" \
                     CODE_SIGN_STYLE="Manual" \
                     CODE_SIGN_IDENTITY="iPhone Distribution" \
                     PROVISIONING_PROFILE="$PROFILE_UUID" \
                     OTHER_CODE_SIGN_FLAGS="--keychain build.keychain" \
                     ENABLE_BITCODE=NO \
+                    BUILD_LIBRARY_FOR_DISTRIBUTION=YES \
+                    SKIP_INSTALL=NO \
+                    OTHER_LDFLAGS="-ObjC -all_load" \
+                    LD_RUNPATH_SEARCH_PATHS="@executable_path/Frameworks" \
                     ONLY_ACTIVE_ARCH=NO \
-                    archive | tee "$HOME/build/debug_build.log"
+                    archive | tee "$HOME/build/archive_log.txt"
           
-          # Capture build logs regardless of success
-          echo "=== BUILD LOGS ==="
-          cat "$HOME/build/debug_build.log"
+          # Immediate archive verification
+          if [ ! -d "$HOME/build/App.xcarchive" ]; then
+            echo "❌ Archive failed - checking logs"
+            grep "error:" "$HOME/build/archive_log.txt" || echo "No explicit errors found in log"
+            exit 1
+          fi
+
+      - name: Verify Archive Contents
+        script: |
+          echo "=== ARCHIVE VERIFICATION ==="
+          ARCHIVE_PATH="$HOME/build/App.xcarchive"
+          APP_PATH="$ARCHIVE_PATH/Products/Applications/App.app"
           
-          # Continue even if build fails to get artifacts
-          exit 0
+          # Basic structure check
+          if [ ! -f "$APP_PATH/App" ]; then
+            echo "❌ App binary missing"
+            echo "Archive contents:"
+            find "$ARCHIVE_PATH" -type f
+            exit 1
+          fi
+          
+          # Size check (Capacitor apps typically >3MB)
+          BINARY_SIZE=$(stat -f%z "$APP_PATH/App")
+          if [ "$BINARY_SIZE" -lt 3000000 ]; then
+            echo "❌ App binary too small ($BINARY_SIZE bytes)"
+            echo "Capacitor symbols:"
+            nm "$APP_PATH/App" | grep -i capacitor || echo "No Capacitor symbols found"
+            exit 1
+          fi
+          
+          echo "✅ Archive verified (Binary size: $BINARY_SIZE bytes)"
+
+      - name: Export IPA
+        script: |
+          echo "=== EXPORTING IPA ==="
+          xcodebuild -exportArchive \
+                    -archivePath "$HOME/build/App.xcarchive" \
+                    -exportPath "$HOME/build/ipa" \
+                    -exportOptionsPlist ExportOptions.plist \
+                    -allowProvisioningUpdates | tee "$HOME/build/export_log.txt"
+          
+          if [ ! -f "$HOME/build/ipa/App.ipa" ]; then
+            echo "❌ IPA export failed"
+            grep "error:" "$HOME/build/export_log.txt" || echo "No explicit errors found"
+            exit 1
+          fi
+          echo "✅ IPA created successfully"
       - name: Validate Bundle (Robust Static Linking Check)
         script: |
           echo "=== VALIDATING BUNDLE ==="
