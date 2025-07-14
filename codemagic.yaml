@@ -30,37 +30,34 @@ workflows:
         - node_modules
         - .angular/cache
     scripts:
-      - name: Enforce Node Version
+      - name: Install and Use Node 18
         script: |
-          echo "=== FORCING NODE 18 ==="
+          echo "=== INSTALLING NODE 18 ==="
+          # Install Node 18 using Codemagic's built-in tool
+          curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.39.7/install.sh | bash
+          export NVM_DIR="$HOME/.nvm"
+          [ -s "$NVM_DIR/nvm.sh" ] && \. "$NVM_DIR/nvm.sh"
           nvm install 18
           nvm use 18
-          node -v # Verify
+          node -v
+          
+          # Verify Node is actually 18.x
+          if ! node -v | grep -q 'v18'; then
+            echo "❌ Failed to set Node 18"
+            exit 1
+          fi
+          
+          # Install required global packages
+          npm install -g npm@latest
+          npm install -g @angular/cli@17.3.17 @ionic/cli@7.2.1 native-run cordova-res
+          
+          # Install correct CocoaPods version
           gem install cocoapods -v 1.16.2 --conservative
       - name: Set Up Environment
         script: |
           brew install jq
           npm install -g npm@latest
           npm install -g @angular/cli@17.3.17 @ionic/cli@7.2.1 native-run cordova-res
-      - name: Verify Node/Ruby Versions
-        script: |
-          echo "=== VERSION VERIFICATION ==="
-          # Enforce Node 18 first
-          nvm install 18
-          nvm use 18
-          
-          # Now verify versions
-          echo "Node: $(node -v)"
-          echo "npm: $(npm -v)"
-          echo "Ruby: $(ruby -v)"
-          echo "CocoaPods: $(pod --version)"
-          echo "Xcode: $(xcodebuild -version)"
-          
-          # Version validation
-          if ! node -v | grep -q 'v18'; then
-            echo "❌ Node 18 not active! Current: $(node -v)"
-            exit 1
-          fi
       - name: Install Dependencies
         script: |
           echo "=== CLEANING ENVIRONMENT ==="
