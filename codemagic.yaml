@@ -18,6 +18,7 @@ workflows:
         CERTIFICATE_PASSWORD: $CERTIFICATE_PASSWORD
         NODE_OPTIONS: "--max-old-space-size=4096"
         NODE_VERSION: "18.x"
+        NVM_DIR: "/Users/builder/.nvm"
       groups:
         - Papricut
     triggering:
@@ -29,6 +30,13 @@ workflows:
         - node_modules
         - .angular/cache
     scripts:
+      - name: Enforce Node Version
+        script: |
+          echo "=== FORCING NODE 18 ==="
+          nvm install 18
+          nvm use 18
+          node -v # Verify
+          gem install cocoapods -v 1.16.2 --conservative
       - name: Set Up Environment
         script: |
           brew install jq
@@ -37,15 +45,20 @@ workflows:
       - name: Verify Node/Ruby Versions
         script: |
           echo "=== VERSION VERIFICATION ==="
-          node -v
-          npm -v
-          ruby -v
-          pod --version
-          xcodebuild -version
+          # Enforce Node 18 first
+          nvm install 18
+          nvm use 18
           
-          # Verify Node compatibility
-          if ! node -v | grep -qE 'v(16|18|20)'; then
-            echo "❌ Unsupported Node version"
+          # Now verify versions
+          echo "Node: $(node -v)"
+          echo "npm: $(npm -v)"
+          echo "Ruby: $(ruby -v)"
+          echo "CocoaPods: $(pod --version)"
+          echo "Xcode: $(xcodebuild -version)"
+          
+          # Version validation
+          if ! node -v | grep -q 'v18'; then
+            echo "❌ Node 18 not active! Current: $(node -v)"
             exit 1
           fi
       - name: Install Dependencies
