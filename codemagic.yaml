@@ -444,11 +444,11 @@ workflows:
           /usr/libexec/PlistBuddy -c "Set :objects:13D8C11F2543F3D900D83B1E:buildSettings:ALWAYS_SEARCH_USER_PATHS YES" "$PBXPROJ_PATH"
           
           echo "✅ Xcode project configured"
-      - name: Pre-Build Xcode Workspace Verification
+      - name: Pre-Build Xcode Workspace Verification (Robust)
         script: |
           echo "=== XCODE WORKSPACE VERIFICATION ==="
           
-          # 1. Verify workspace structure
+          # 1. Verify workspace exists
           if [ ! -d "$XCODE_WORKSPACE" ]; then
             echo "❌ Xcode workspace missing at $XCODE_WORKSPACE"
             echo "Directory contents:"
@@ -456,16 +456,43 @@ workflows:
             exit 1
           fi
           
-          # 2. Verify scheme exists
-          SCHEME_PATH="$XCODE_WORKSPACE/xcshareddata/xcschemes/$XCODE_SCHEME.xcscheme"
-          if [ ! -f "$SCHEME_PATH" ]; then
-            echo "❌ Scheme $XCODE_SCHEME missing in workspace"
-            echo "Available schemes:"
-            find "$XCODE_WORKSPACE/xcshareddata/xcschemes" -name "*.xcscheme" | xargs -n1 basename
-            exit 1
+          # 2. Find scheme location (could be in workspace or project)
+          SCHEME_PATH=""
+          if [ -d "$XCODE_WORKSPACE/xcshareddata/xcschemes" ]; then
+            SCHEME_PATH="$XCODE_WORKSPACE/xcshareddata/xcschemes/$XCODE_SCHEME.xcscheme"
+          elif [ -d "ios/App/App.xcodeproj/xcshareddata/xcschemes" ]; then
+            SCHEME_PATH="ios/App/App.xcodeproj/xcshareddata/xcschemes/$XCODE_SCHEME.xcscheme"
           fi
           
-          # 3. Verify build directory permissions
+          # 3. Verify scheme exists
+          if [ -z "$SCHEME_PATH" ] || [ ! -f "$SCHEME_PATH" ]; then
+            echo "⚠️ Scheme $XCODE_SCHEME not found in standard locations"
+            echo "Attempting to list all available schemes..."
+            
+            # List schemes from both possible locations
+            echo "Potential schemes in workspace:"
+            find "$XCODE_WORKSPACE/xcshareddata/xcschemes" -name "*.xcscheme" 2>/dev/null | xargs -n1 basename || echo "No workspace schemes found"
+            
+            echo "Potential schemes in project:"
+            find "ios/App/App.xcodeproj/xcshareddata/xcschemes" -name "*.xcscheme" 2>/dev/null | xargs -n1 basename || echo "No project schemes found"
+            
+            # Attempt to use first found scheme if none specified
+            FIRST_SCHEME=$(find "$XCODE_WORKSPACE" "ios/App/App.xcodeproj" -name "*.xcscheme" 2>/dev/null | head -1)
+            if [ -n "$FIRST_SCHEME" ]; then
+              SCHEME_NAME=$(basename "$FIRST_SCHEME" .xcscheme)
+              echo "ℹ️ Using first found scheme: $SCHEME_NAME"
+              echo "export XCODE_SCHEME=$SCHEME_NAME" >> $CM_ENV
+              exit 0
+            else
+              echo "❌ No schemes found in workspace or project"
+              echo "Generating a new scheme..."
+              xcodebuild -list -workspace "$XCODE_WORKSPACE"
+              xcodebuild -workspace "$XCODE_WORKSPACE" -list
+              exit 1
+            fi
+          fi
+          
+          # 4. Verify build directory permissions
           mkdir -p "$HOME/build"
           if ! touch "$HOME/build/test_file"; then
             echo "❌ Cannot write to build directory"
@@ -475,7 +502,7 @@ workflows:
           fi
           rm "$HOME/build/test_file"
           
-          echo "✅ Xcode workspace verified"
+          echo "✅ Xcode workspace verified - using scheme at $SCHEME_PATH"
 
       - name: Build IPA with Enhanced Diagnostics
         script: |
