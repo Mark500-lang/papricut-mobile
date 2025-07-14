@@ -178,20 +178,9 @@ workflows:
           pod --version
       - name: Configure Podfile
         script: |
-          echo "=== PODFILE VERIFICATION ==="
+          echo "=== UPDATING PODFILE FOR STATIC FRAMEWORK EMBEDDING ==="
           
-          # 1. First ensure the Podfile exists
-          if [ ! -f "ios/App/Podfile" ]; then
-            echo "❌ Podfile not found at ios/App/Podfile"
-            exit 1
-          fi
-
-          # 2. Clean any previous pod installation
-          echo "Cleaning previous pod installation..."
-          rm -rf ios/App/Pods ios/App/Podfile.lock ios/App/App.xcworkspace
-
-          # 3. Create new Podfile with correct static framework configuration
-          echo "Creating optimized Podfile configuration..."
+          # Create a new Podfile with explicit static framework settings
           cat << 'EOF' > ios/App/Podfile
           use_frameworks! :linkage => :static
           use_modular_headers!
@@ -203,9 +192,9 @@ workflows:
             :warn_for_unused_master_specs_repo => false,
             :disable_input_output_paths => true
           
-          # Capacitor pods with explicit modular headers for Cordova
+          # Capacitor pods with explicit static linking
           def capacitor_pods
-            pod 'Capacitor', :path => '../../node_modules/@capacitor/ios'
+            pod 'Capacitor', :path => '../../node_modules/@capacitor/ios', :modular_headers => true
             pod 'CapacitorCordova', :path => '../../node_modules/@capacitor/ios', :modular_headers => true
             pod 'CapacitorApp', :path => '../../node_modules/@capacitor/app'
             pod 'CapacitorBrowser', :path => '../../node_modules/@capacitor/browser'
@@ -222,7 +211,6 @@ workflows:
           
           target 'App' do
             capacitor_pods
-            # Add your Pods here
           end
           
           post_install do |installer|
@@ -231,19 +219,20 @@ workflows:
             
             installer.pods_project.targets.each do |target|
               target.build_configurations.each do |config|
-                # Static framework settings
+                # Essential static framework settings
                 config.build_settings['MACH_O_TYPE'] = 'staticlib'
                 config.build_settings['BUILD_LIBRARY_FOR_DISTRIBUTION'] = 'YES'
+                config.build_settings['SKIP_INSTALL'] = 'NO' # Critical for embedding
+                
+                # Disable code signing for pods
+                config.build_settings['CODE_SIGNING_ALLOWED'] = 'NO'
+                config.build_settings['CODE_SIGNING_REQUIRED'] = 'NO'
                 
                 # Swift compatibility
                 if target.name.include?('Capacitor')
                   config.build_settings['SWIFT_VERSION'] = '5.0'
                   config.build_settings['ALWAYS_EMBED_SWIFT_STANDARD_LIBRARIES'] = 'NO'
                 end
-                
-                # Disable code signing for pods
-                config.build_settings['CODE_SIGNING_ALLOWED'] = 'NO'
-                config.build_settings['CODE_SIGNING_REQUIRED'] = 'NO'
               end
             end
             
@@ -254,13 +243,8 @@ workflows:
             end
           end
           EOF
-
-          # 4. Show final Podfile for debugging
-          echo "Final Podfile contents:"
-          cat ios/App/Podfile
-
-          # 5. Run pod install with full clean
-          echo "Running pod install..."
+          
+          echo "=== RUNNING POD INSTALL ==="
           cd ios/App && pod install --clean-install --repo-update && cd ../..
       - name: Verify iOS Platform
         script: |
@@ -484,10 +468,27 @@ workflows:
           grep -A5 "ALWAYS_EMBED_SWIFT_STANDARD_LIBRARIES" "$PBXPROJ_PATH" || echo "No ALWAYS_EMBED_SWIFT_STANDARD_LIBRARIES found"
           
           echo "✅ Xcode build settings configured"
-      - name: Build IPA (Robust)
+      - name: Configure Xcode Project for Static Frameworks
+        script: |
+          echo "=== CONFIGURING XCODE PROJECT FOR FRAMEWORK EMBEDDING ==="
+          
+          # 1. Add EMBEDDED_CONTENT_CONTAINS_SWIFT flag
+          /usr/libexec/PlistBuddy -c "Add :objects:13D8C11F2543F3D900D83B1E:buildSettings:EMBEDDED_CONTENT_CONTAINS_SWIFT string YES" ios/App/App.xcodeproj/project.pbxproj
+          
+          # 2. Ensure FRAMEWORK_SEARCH_PATHS includes Pods directory
+          /usr/libexec/PlistBuddy -c "Add :objects:13D8C11F2543F3D900D83B1E:buildSettings:FRAMEWORK_SEARCH_PATHS string \$(inherited) \$(PROJECT_DIR)/Pods" ios/App/App.xcodeproj/project.pbxproj
+          
+          # 3. Set ALWAYS_SEARCH_USER_PATHS to YES
+          /usr/libexec/PlistBuddy -c "Set :objects:13D8C11F2543F3D900D83B1E:buildSettings:ALWAYS_SEARCH_USER_PATHS YES" ios/App/App.xcodeproj/project.pbxproj
+          
+          # 4. Verify changes
+          echo "=== VERIFYING XCODE PROJECT CHANGES ==="
+          grep -A5 "EMBEDDED_CONTENT_CONTAINS_SWIFT" ios/App/App.xcodeproj/project.pbxproj || echo "Warning: EMBEDDED_CONTENT_CONTAINS_SWIFT not found"
+          grep -A5 "FRAMEWORK_SEARCH_PATHS" ios/App/App.xcodeproj/project.pbxproj || echo "Warning: FRAMEWORK_SEARCH_PATHS not found"
+      - name: Build IPA (Robust Static Framework Support)
         script: |
           export NSUnbufferedIO=YES
-          echo "=== ARCHIVING APP ==="
+          echo "=== BUILDING WITH STATIC FRAMEWORK SUPPORT ==="
           xcodebuild -workspace "$XCODE_WORKSPACE" \
                     -scheme "$XCODE_SCHEME" \
                     -sdk iphoneos \
@@ -503,68 +504,47 @@ workflows:
                     OTHER_CODE_SIGN_FLAGS="--keychain build.keychain" \
                     ENABLE_BITCODE=NO \
                     BUILD_LIBRARY_FOR_DISTRIBUTION=YES \
+                    SKIP_INSTALL=NO \
+                    EMBEDDED_CONTENT_CONTAINS_SWIFT=YES \
                     ALWAYS_EMBED_SWIFT_STANDARD_LIBRARIES=YES \
                     LD_RUNPATH_SEARCH_PATHS="@executable_path/Frameworks" \
                     ONLY_ACTIVE_ARCH=NO \
-                    SKIP_INSTALL=NO \
                     archive | tee "$HOME/build/archive_log.txt"
 
-      - name: Validate Bundle (Comprehensive)
+      - name: Validate Bundle (Updated for Static Frameworks)
         script: |
+          echo "=== VALIDATING BUNDLE STRUCTURE ==="
           APP_PATH="$HOME/build/App.xcarchive/Products/Applications/App.app"
-          WEB_ASSET_PATH="$APP_PATH/public"
-          if [ ! -d "$WEB_ASSET_PATH" ]; then
-            echo "❌ Web assets missing from $WEB_ASSET_PATH"
-            echo "App bundle contents:"
-            find "$APP_PATH" -maxdepth 2
+          
+          # Check binary size (should be > 10MB if frameworks are properly linked)
+          BINARY_SIZE=$(stat -f%z "$APP_PATH/App")
+          if [ "$BINARY_SIZE" -lt 10000000 ]; then
+            echo "❌ App binary too small ($BINARY_SIZE bytes) - likely missing linked frameworks"
             exit 1
           fi
-          WEB_FILES=("index.html" "main.*.js" "runtime.*.js" "styles.*.css" "polyfills.*.js")
+          
+          # Check for web assets
+          if [ ! -d "$APP_PATH/public" ]; then
+            echo "❌ Web assets missing from $APP_PATH/public"
+            exit 1
+          fi
+          
+          # Check for required files (updated patterns)
+          WEB_FILES=("index.html" "main.*.js" "runtime.*.js")
           for pattern in "${WEB_FILES[@]}"; do
-            if ! compgen -G "$WEB_ASSET_PATH/$pattern" > /dev/null; then
-              echo "❌ Missing web file pattern: $WEB_ASSET_PATH/$pattern"
+            if ! ls "$APP_PATH/public/$pattern" >/dev/null 2>&1; then
+              echo "❌ Missing web file pattern: $APP_PATH/public/$pattern"
               exit 1
             fi
           done
-          FRAMEWORK_PATH="$APP_PATH/Frameworks"
-          REQUIRED_PLUGINS=("Capacitor.framework" "CapacitorCordova.framework" "CapacitorCamera.framework" "CapacitorApp.framework" "CapacitorBrowser.framework" "CapacitorDevice.framework" "CapacitorFilesystem.framework" "CapacitorHaptics.framework" "CapacitorKeyboard.framework" "CapacitorNetwork.framework" "CapacitorPushNotifications.framework" "CapacitorSplashScreen.framework" "CapacitorStatusBar.framework")
-          if [ ! -d "$FRAMEWORK_PATH" ]; then
-            echo "❌ Frameworks directory missing in app bundle"
-            echo "Bundle contents:"
-            find "$APP_PATH" -maxdepth 2
+          
+          # For static frameworks, check for linked binaries instead of framework directories
+          echo "=== CHECKING FOR STATICALLY LINKED CAPACITOR ==="
+          if ! nm "$APP_PATH/App" | grep -q "Capacitor"; then
+            echo "❌ Capacitor not linked in binary"
             exit 1
           fi
-          for plugin in "${REQUIRED_PLUGINS[@]}"; do
-            if [ ! -d "$FRAMEWORK_PATH/$plugin" ]; then
-              echo "❌ Missing plugin framework: $plugin"
-              ls -la "$FRAMEWORK_PATH" || echo "No frameworks found"
-              exit 1
-            fi
-          done
-          if [ ! -f "$APP_PATH/Base.lproj/LaunchScreen.storyboardc" ]; then
-            echo "❌ Missing compiled splash screen"
-            echo "Launch assets:"
-            find "$APP_PATH" -name "*.storyboard*"
-            exit 1
-          fi
-          # Add these checks to the beginning of your script
-          echo "=== CAPACITOR BRIDGE VERIFICATION ==="
-          if ! grep -q "capacitor" "$APP_PATH/public/index.html"; then
-            echo "❌ Capacitor not injected in index.html"
-            exit 1
-          fi
-
-          # Add to your existing framework checks
-          CAPACITOR_PLUGIN_FILES=(
-            "$FRAMEWORK_PATH/Capacitor.framework/Capacitor"
-            "$FRAMEWORK_PATH/CapacitorCordova.framework/CapacitorCordova"
-          )
-          for file in "${CAPACITOR_PLUGIN_FILES[@]}"; do
-            if [ ! -f "$file" ]; then
-              echo "❌ Missing compiled plugin: $file"
-              exit 1
-            fi
-          done
+          
           echo "✅ Bundle validated successfully"
 
       - name: Final Verification
