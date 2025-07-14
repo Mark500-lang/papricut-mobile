@@ -9,7 +9,7 @@ import { Storage } from '@ionic/storage';
 import { ToastController, NavController } from '@ionic/angular';
 import { Camera, CameraResultType, CameraSource } from '@capacitor/camera';
 import { HttpClient } from '@angular/common/http';
-import { environment } from 'src/environments/environment';
+import { environment } from '../../environments/environment';
 
 @Component({
   selector: 'app-register',

@@ -12,7 +12,7 @@ import { StatusBar, StatusBarStyle } from '@capacitor/status-bar';
 import { App as CapacitorApp } from '@capacitor/app';
 import { Network } from '@capacitor/network';
 import { Storage } from '@ionic/storage';
-import { environment } from 'src/environments/environment';
+import { environment } from '../environments/environment';
 import { ApiService } from './services/api.service';
 import { NetworkService } from './services/network.service';
 import { AuthService } from './services/auth.service';

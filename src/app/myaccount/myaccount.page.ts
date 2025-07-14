@@ -4,7 +4,7 @@ import { NavController, AlertController } from '@ionic/angular';
 import { ApiService } from '../services/api.service';
 import { NetworkService } from '../services/network.service';
 import { AuthService } from '../services/auth.service';
-import { environment } from 'src/environments/environment';
+import { environment } from '../../environments/environment';
 
 @Component({
   selector: 'app-myaccount',

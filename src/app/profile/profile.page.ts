@@ -7,7 +7,7 @@ import { NetworkService } from '../services/network.service';
 import { HttpClient } from '@angular/common/http';
 import { DomSanitizer } from '@angular/platform-browser';
 
-import { environment } from 'src/environments/environment';
+import { environment } from '../../environments/environment';
 import {
   API_ERROR_TITLE,
   API_ERROR_MESSAGE

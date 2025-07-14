@@ -3,7 +3,7 @@ import { HttpClient } from '@angular/common/http';
 import { HttpHeaders } from '@angular/common/http';
 import { Observable } from 'rxjs';
 import { Storage } from '@ionic/storage';
-import { environment } from 'src/environments/environment';
+import { environment } from '../../environments/environment';
 import { Browser } from '@capacitor/browser';
 
 @Injectable({
