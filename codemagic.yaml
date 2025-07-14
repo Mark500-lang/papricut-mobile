@@ -335,45 +335,48 @@ workflows:
           echo "First 50 chars: ${DISTRIBUTION_CERTIFICATE:0:50}"
           echo "Provisioning Profile length: ${#PROVISIONING_PROFILE}"
           echo "First 50 chars: ${PROVISIONING_PROFILE:0:50}"
-      - name: Decode Signing Assets
+      - name: Decode signing certificate and provisioning profile
         script: |
           echo "=== DECODING SIGNING ASSETS ==="
           
-          # Debug: Show actual variable values (masked for security)
-          echo "Distribution Certificate length: ${#DISTRIBUTION_CERTIFICATE}"
-          echo "Provisioning Profile length: ${#PROVISIONING_PROFILE}"
+          # Debug: Verify variables are set
+          echo "Environment variables available:"
+          printenv | grep -E 'DISTRIBUTION_CERTIFICATE|PROVISIONING_PROFILE|CERTIFICATE_PASSWORD'
           
-          # Verify variables contain actual data (not just variable names)
-          if [[ "$DISTRIBUTION_CERTIFICATE" == \$DISTRIBUTION* ]] || [[ "$PROVISIONING_PROFILE" == \$PROVISIONING* ]]; then
-            echo "❌ CRITICAL: Environment variables not resolved!"
-            echo "Check your Codemagic environment variable configuration"
-            echo "The variables appear to contain their own names rather than values"
+          # Verify variables contain actual base64 data
+          if [[ "$DISTRIBUTION_CERTIFICATE" == "" ]] || [[ "$PROVISIONING_PROFILE" == "" ]]; then
+            echo "❌ ERROR: Signing variables are empty!"
+            echo "Please check your Codemagic environment variables configuration"
+            echo "Ensure DISTRIBUTION_CERTIFICATE and PROVISIONING_PROFILE are properly set"
             exit 1
           fi
           
-          # Clean existing files
+          # Clean any existing files
           rm -f signing.p12 "$PROFILE_NAME.mobileprovision"
           
-          # Decode with improved error handling
-          echo "$DISTRIBUTION_CERTIFICATE" | base64 -D > signing.p12 2>decode_error.txt || {
+          # Decode certificate (with improved error handling)
+          echo "$DISTRIBUTION_CERTIFICATE" | base64 -D -o signing.p12 2>cert_decode_err.txt
+          if [ $? -ne 0 ] || [ ! -s "signing.p12" ]; then
             echo "❌ Failed to decode distribution certificate"
             echo "Error output:"
-            cat decode_error.txt
-            echo "Certificate content start:"
+            cat cert_decode_err.txt
+            echo "First 100 chars of certificate data:"
             echo "${DISTRIBUTION_CERTIFICATE:0:100}"
             exit 1
-          }
+          fi
           
-          echo "$PROVISIONING_PROFILE" | base64 -D > "$PROFILE_NAME.mobileprovision" 2>decode_error.txt || {
+          # Decode provisioning profile
+          echo "$PROVISIONING_PROFILE" | base64 -D -o "$PROFILE_NAME.mobileprovision" 2>profile_decode_err.txt
+          if [ $? -ne 0 ] || [ ! -s "$PROFILE_NAME.mobileprovision" ]; then
             echo "❌ Failed to decode provisioning profile"
             echo "Error output:"
-            cat decode_error.txt
-            echo "Profile content start:"
+            cat profile_decode_err.txt
+            echo "First 100 chars of profile data:"
             echo "${PROVISIONING_PROFILE:0:100}"
             exit 1
-          }
+          fi
           
-          echo "✅ Signing assets decoded successfully"
+          echo "✅ Successfully decoded signing assets"
           echo "File sizes:"
           ls -la signing.p12 "$PROFILE_NAME.mobileprovision"
 
