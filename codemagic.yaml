@@ -173,8 +173,16 @@ workflows:
           use_frameworks! :linkage => :static
 
           target 'App' do
-            pod 'Capacitor', :path => '../../node_modules/@capacitor/ios'
-            pod 'CapacitorCordova', :path => '../../node_modules/@capacitor/ios'
+            # Core Capacitor with explicit static configuration
+            pod 'Capacitor', :path => '../../node_modules/@capacitor/ios', 
+                :modular_headers => true,
+                :configuration => ['Debug', 'Release']
+            
+            pod 'CapacitorCordova', :path => '../../node_modules/@capacitor/ios',
+                :modular_headers => true,
+                :configuration => ['Debug', 'Release']
+            
+            # Capacitor Plugins
             pod 'CapacitorApp', :path => '../../node_modules/@capacitor/app'
             pod 'CapacitorCamera', :path => '../../node_modules/@capacitor/camera'
             pod 'CapacitorKeyboard', :path => '../../node_modules/@capacitor/keyboard'
@@ -183,17 +191,45 @@ workflows:
           post_install do |installer|
             installer.pods_project.targets.each do |target|
               target.build_configurations.each do |config|
+                # Common settings for all targets
                 config.build_settings['BUILD_LIBRARY_FOR_DISTRIBUTION'] = 'YES'
-                config.build_settings['MACH_O_TYPE'] = 'staticlib'
                 config.build_settings['SKIP_INSTALL'] = 'NO'
                 config.build_settings['CODE_SIGNING_ALLOWED'] = 'NO'
                 
-                # For Capacitor targets specifically
+                # Special handling for Capacitor targets
                 if target.name.start_with?('Capacitor')
                   config.build_settings['DEFINES_MODULE'] = 'YES'
                   config.build_settings['SWIFT_VERSION'] = '5.0'
+                  config.build_settings['MACH_O_TYPE'] = 'staticlib'
+                  config.build_settings['OTHER_CFLAGS'] = '-fmodule-map-file=${PODS_ROOT}/Headers/Public/Capacitor/module.modulemap'
+                  config.build_settings['OTHER_SWIFT_FLAGS'] = '-import-underlying-module'
+                  config.build_settings['CLANG_ENABLE_MODULES'] = 'YES'
+                  config.build_settings['GENERATE_INFOPLIST_FILE'] = 'YES'
                 end
               end
+            end
+
+            # Create required modulemap and headers
+            capacitor_dir = File.join(installer.sandbox.root, 'Headers/Public/Capacitor')
+            FileUtils.mkdir_p(capacitor_dir)
+            
+            # Modulemap content
+            modulemap_content = <<-MODULEMAP
+            framework module Capacitor {
+              umbrella header "Capacitor.h"
+              export *
+              module * { export * }
+            }
+            MODULEMAP
+            
+            File.write(File.join(capacitor_dir, 'module.modulemap'), modulemap_content)
+            
+            # Copy required headers from node_modules
+            headers = Dir.glob(File.join('../../node_modules/@capacitor/ios/Capacitor/Capacitor', '*.h'))
+            headers.each do |header|
+              header_name = File.basename(header)
+              dest = File.join(capacitor_dir, header_name)
+              FileUtils.cp(header, dest) unless File.exist?(dest)
             end
           end
           EOF
@@ -252,18 +288,40 @@ workflows:
 
       - name: Verify Static Framework Setup
         script: |
-          echo "=== VERIFYING STATIC FRAMEWORKS ==="
+          echo "=== VERIFYING STATIC FRAMEWORK SETUP ==="
           cd ios/App
           
-          # First check if library exists without building
-          if find Pods -name "libCapacitor.a" | grep -q "libCapacitor.a"; then
-            echo "✅ Capacitor static library exists"
-            exit 0
+          # 1. Verify modulemap exists
+          if [ ! -f "Pods/Headers/Public/Capacitor/module.modulemap" ]; then
+            echo "❌ Critical: Missing Capacitor module.modulemap"
+            echo "Creating modulemap..."
+            mkdir -p Pods/Headers/Public/Capacitor
+            cat <<EOF > Pods/Headers/Public/Capacitor/module.modulemap
+            framework module Capacitor {
+              umbrella header "Capacitor.h"
+              export *
+              module * { export * }
+            }
+            EOF
           fi
-          
-          echo "ℹ️ Capacitor static library not found, attempting to build..."
-          
-          # Build using xcodebuild through workspace
+
+          # 2. Verify umbrella header exists
+          if [ ! -f "Pods/Headers/Public/Capacitor/Capacitor.h" ]; then
+            echo "❌ Critical: Missing Capacitor.h umbrella header"
+            echo "Copying headers from node_modules..."
+            mkdir -p Pods/Headers/Public/Capacitor
+            cp ../../node_modules/@capacitor/ios/Capacitor/Capacitor/*.h Pods/Headers/Public/Capacitor/
+          fi
+
+          # 3. Verify Pods project is configured for static libs
+          if ! grep -q "MACH_O_TYPE = staticlib" "Pods/Pods.xcodeproj/project.pbxproj"; then
+            echo "❌ Pods not configured for static linking - regenerating Pods"
+            rm -rf Pods Podfile.lock
+            pod install --repo-update
+          fi
+
+          # 4. Build Capacitor static library explicitly
+          echo "Building Capacitor static library..."
           xcodebuild -workspace App.xcworkspace \
                     -scheme Capacitor \
                     -configuration Release \
@@ -274,15 +332,24 @@ workflows:
                     SKIP_INSTALL=NO \
                     build | tee capacitor_build.log
           
-          # Verify build succeeded
-          if ! find Pods -name "libCapacitor.a" | grep -q "libCapacitor.a"; then
-            echo "❌ Failed to build static library"
+          # 5. Verify the static library was created
+          LIB_PATH=$(find "${PWD}/Pods" -name "libCapacitor.a" | head -1)
+          if [ -z "$LIB_PATH" ]; then
+            echo "❌ Failed to build Capacitor static library"
             echo "=== BUILD ERRORS ==="
-            grep -i "error" capacitor_build.log || echo "No error messages found"
+            grep -A5 -B5 "error:" capacitor_build.log | grep -v "errors generated" | head -50
             exit 1
           fi
-          
-          echo "✅ Static framework verification passed"
+
+          # 6. Verify architectures in the static library
+          ARCHS=$(lipo -info "$LIB_PATH" 2>/dev/null | awk -F': ' '{print $2}')
+          if [[ ! "$ARCHS" =~ "arm64" ]]; then
+            echo "❌ Capacitor static library missing arm64 architecture"
+            echo "Found architectures: $ARCHS"
+            exit 1
+          fi
+
+          echo "✅ Static framework setup verified"
 
       - name: Verify Pod Installation Results
         script: |
@@ -428,18 +495,14 @@ workflows:
                     BUILD_LIBRARY_FOR_DISTRIBUTION=YES \
                     SKIP_INSTALL=NO \
                     OTHER_LDFLAGS="-ObjC -all_load -lCapacitor -lCapacitorCordova" \
-                    LIBRARY_SEARCH_PATHS="\$(inherited) $CAPACITOR_IOS_POD_PATH $CAPACITOR_LIB_SEARCH_PATHS" \
-                    FRAMEWORK_SEARCH_PATHS="\$(inherited) $CAPACITOR_IOS_POD_PATH" \
+                    LIBRARY_SEARCH_PATHS="\$(inherited) ${PODS_CONFIGURATION_BUILD_DIR}/Capacitor ${PODS_CONFIGURATION_BUILD_DIR}/CapacitorCordova ${PODS_ROOT}/../../node_modules/@capacitor/ios/Capacitor" \
+                    FRAMEWORK_SEARCH_PATHS="\$(inherited) ${PODS_ROOT}/Capacitor ${PODS_ROOT}/CapacitorCordova" \
                     LD_RUNPATH_SEARCH_PATHS="@executable_path/Frameworks" \
                     ONLY_ACTIVE_ARCH=NO \
-                    GCC_PREPROCESSOR_DEFINITIONS="\$(inherited) CAPACITOR_ENABLE_STATIC_FRAMEWORK=1" \
+                    GCC_PREPROCESSOR_DEFINITIONS="\$(inherited) CAPACITOR_ENABLE_STATIC_FRAMEWORK=1 CAPACITOR_USE_STATIC=1" \
+                    SWIFT_INCLUDE_PATHS="${PODS_ROOT}/Headers/Public/Capacitor" \
+                    CLANG_ENABLE_MODULES=YES \
                     archive | tee "$HOME/build/xcodebuild.log"
-          
-          if [ $? -ne 0 ]; then
-            echo "❌ Build failed - analyzing logs"
-            grep -A5 -B5 "error:" "$HOME/build/xcodebuild.log" | grep -v "errors generated" | head -50
-            exit 1
-          fi
           
           echo "✅ Build completed successfully"
 
