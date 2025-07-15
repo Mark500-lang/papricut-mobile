@@ -24,30 +24,31 @@ workflows:
         - node_modules
         - .angular/cache
     scripts:
-      # - name: Complete Build Environment Cleanup
-      #   script: |
-      #     echo "=== COMPLETE BUILD ENVIRONMENT CLEANUP ==="
-      #     # Xcode caches
-      #     rm -rf ~/Library/Developer/Xcode/DerivedData/*
-      #     rm -rf ~/Library/Caches/com.apple.dt.Xcode
+      - name: Complete Build Environment Cleanup
+        script: |
+          echo "=== COMPLETE BUILD ENVIRONMENT CLEANUP ==="
+          # Xcode caches
+          rm -rf ~/Library/Developer/Xcode/DerivedData/*
+          rm -rf ~/Library/Caches/com.apple.dt.Xcode
           
-      #     # Pods reset
-      #     rm -rf ios/App/Pods
-      #     rm -rf ios/App/Podfile.lock
+          # Pods reset
+          rm -rf ios/App/Pods
+          rm -rf ios/App/Podfile.lock
           
-      #     # Node cleanup
-      #     rm -rf node_modules
-      #     rm -rf .angular/cache
+          # Node cleanup
+          rm -rf node_modules
+          rm -rf .angular/cache
           
-      #     # Capacitor iOS platform reset
-      #     rm -rf ios/App/App/public
-      #     rm -rf ios/App/App.xcworkspace/xcuserdata
+          # Capacitor iOS platform reset
+          rm -rf ios/App/App/public
+          rm -rf ios/App/App.xcworkspace/xcuserdata
           
-      #     echo "✅ Environment cleaned"
+          echo "✅ Environment cleaned"
 
       - name: Install and Use Node 18
         script: |
           echo "=== INSTALLING NODE 18 ==="
+          # Install Node 18 using Codemagic's built-in tool
           curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.39.7/install.sh | bash
           export NVM_DIR="$HOME/.nvm"
           [ -s "$NVM_DIR/nvm.sh" ] && \. "$NVM_DIR/nvm.sh"
@@ -55,30 +56,46 @@ workflows:
           nvm use 18
           node -v
           
+          # Verify Node is actually 18.x
           if ! node -v | grep -q 'v18'; then
             echo "❌ Failed to set Node 18"
             exit 1
           fi
           
+          # Install required global packages
           npm install -g npm@latest
           npm install -g @angular/cli@17.3.17 @ionic/cli@7.2.1 native-run cordova-res
-          gem install cocoapods -v 1.15.2 --conservative
-
+          
+          # Install correct CocoaPods version
+          gem install cocoapods -v 1.16.2 --conservative
+      # - name: Set Up Environment
+      #   script: |
+      #     brew install jq
+      #     npm install -g npm@latest
+      #     npm install -g @angular/cli@17.3.17 @ionic/cli@7.2.1 native-run cordova-res
       - name: Install Dependencies
         script: |
+          echo "=== CLEANING ENVIRONMENT ==="
+          rm -rf node_modules .angular/cache
+          npm cache clean --force
+          
           echo "=== INSTALLING DEPENDENCIES ==="
           npm install --legacy-peer-deps --no-audit
           npm install --save-exact @angular-devkit/build-angular@17.3.17 @ionic/angular-toolkit@7.1.1
           
+          echo "=== VERIFYING INSTALLATIONS ==="
           if [ ! -d "node_modules/@angular-devkit/build-angular" ]; then
             echo "❌ CRITICAL: Angular build tools missing!"
             npm list
             exit 1
           fi
-
       - name: Verify Capacitor Plugins
         script: |
           echo "=== CAPACITOR PLUGIN CHECK ==="
+          # Check engine requirements
+          grep -r "engine" node_modules/@capacitor/*/package.json | grep "node"
+          
+          # Verify core plugins exist
           REQUIRED_PLUGINS=(
             "@capacitor/core" 
             "@capacitor/ios"
@@ -92,18 +109,34 @@ workflows:
               exit 1
             fi
           done
-
+      - name: Verify Environment Files
+        script: |
+          if [ ! -f "src/environments/environment.ts" ] || [ ! -f "src/environments/environment.prod.ts" ]; then
+            echo "❌ Missing environment files!"
+            ls -la src/environments/
+            exit 1
+          fi
       - name: Build Angular App
         script: |
           echo "=== BUILDING PRODUCTION ASSETS ==="
+          
+          # First verify environment files
+          if [ ! -f "src/environments/environment.prod.ts" ]; then
+            echo "❌ Missing production environment file!"
+            exit 1
+          fi
+          
+          # Run build with verbose output
           ng build --configuration production --output-path www --verbose
           
           if [ ! -d "www" ]; then
             echo "❌ Build failed - www directory not created"
+            echo "=== BUILD DEBUG OUTPUT ==="
             cat angular.log || echo "No angular.log found"
             exit 1
           fi
           
+          # Verify critical files
           REQUIRED_FILES=(
             "www/index.html"
             "www/main.*.js"
