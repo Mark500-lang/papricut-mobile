@@ -291,10 +291,9 @@ workflows:
           echo "=== VERIFYING STATIC FRAMEWORK SETUP ==="
           cd ios/App || { echo "❌ Failed to enter ios/App directory"; exit 1; }
           
-          # 1. Verify modulemap exists
+          # 1. Ensure headers and modulemap exist
+          mkdir -p Pods/Headers/Public/Capacitor
           if [ ! -f "Pods/Headers/Public/Capacitor/module.modulemap" ]; then
-            echo "ℹ️ Creating missing Capacitor module.modulemap..."
-            mkdir -p Pods/Headers/Public/Capacitor
             cat > Pods/Headers/Public/Capacitor/module.modulemap <<'EOM'
           framework module Capacitor {
             umbrella header "Capacitor.h"
@@ -304,67 +303,65 @@ workflows:
           EOM
           fi
 
-          # 2. Verify umbrella header exists
           if [ ! -f "Pods/Headers/Public/Capacitor/Capacitor.h" ]; then
-            echo "ℹ️ Copying missing Capacitor headers..."
-            mkdir -p Pods/Headers/Public/Capacitor
-            cp ../../node_modules/@capacitor/ios/Capacitor/Capacitor/*.h Pods/Headers/Public/Capacitor/ || {
-              echo "❌ Failed to copy Capacitor headers";
-              exit 1;
-            }
+            cp ../../node_modules/@capacitor/ios/Capacitor/Capacitor/*.h Pods/Headers/Public/Capacitor/
           fi
 
-          # 3. Verify Pods configuration
-          if ! grep -q "MACH_O_TYPE = staticlib" "Pods/Pods.xcodeproj/project.pbxproj"; then
-            echo "ℹ️ Regenerating Pods with static configuration..."
-            rm -rf Pods Podfile.lock
-            pod install --repo-update || {
-              echo "❌ Failed to regenerate Pods";
-              exit 1;
-            }
-          fi
-
-          # 4. Build Capacitor static library
+          # 2. Build Capacitor static library
           echo "ℹ️ Building Capacitor static library..."
+          DERIVED_DATA_DIR="${PWD}/DerivedData"
           xcodebuild \
             -workspace App.xcworkspace \
             -scheme Capacitor \
             -configuration Release \
             -sdk iphoneos \
+            -derivedDataPath "${DERIVED_DATA_DIR}" \
             BUILD_LIBRARY_FOR_DISTRIBUTION=YES \
             MACH_O_TYPE=staticlib \
             ONLY_ACTIVE_ARCH=NO \
             SKIP_INSTALL=NO \
             build > capacitor_build.log 2>&1
 
-          BUILD_RESULT=$?
-          if [ $BUILD_RESULT -ne 0 ]; then
-            echo "❌ Failed to build Capacitor static library (code $BUILD_RESULT)"
-            echo "=== BUILD ERRORS ==="
-            grep -A5 -B5 "error:" capacitor_build.log | grep -v "errors generated" | head -50
+          if [ $? -ne 0 ]; then
+            echo "❌ Build failed"
+            grep -A10 "error:" capacitor_build.log || echo "No error details found"
             exit 1
           fi
 
-          # 5. Verify static library
-          LIB_PATH=$(find "${PWD}/Pods" -name "libCapacitor.a" | head -n 1)
+          # 3. Locate the built library (check both possible locations)
+          LIB_PATHS=(
+            "${DERIVED_DATA_DIR}/Build/Products/Release-iphoneos/Capacitor/libCapacitor.a"
+            "Pods/Capacitor/libCapacitor.a"
+          )
+
+          LIB_PATH=""
+          for path in "${LIB_PATHS[@]}"; do
+            if [ -f "$path" ]; then
+              LIB_PATH="$path"
+              break
+            fi
+          done
+
           if [ -z "$LIB_PATH" ]; then
-            echo "❌ Failed to find built Capacitor static library"
-            echo "Search paths:"
-            find "${PWD}/Pods" -name "*.a" -exec echo "  {}" \;
+            echo "❌ Failed to locate built Capacitor static library"
+            echo "Searched in:"
+            printf "  • %s\n" "${LIB_PATHS[@]}"
+            echo "Build directory contents:"
+            find "${DERIVED_DATA_DIR}/Build/Products" -name "*.a" -exec echo "  {}" \;
             exit 1
           fi
 
-          # 6. Verify architectures
+          # 4. Verify architectures
           ARCHS=$(lipo -info "$LIB_PATH" 2>/dev/null | awk -F': ' '{print $2}')
           if [[ ! "$ARCHS" =~ "arm64" ]]; then
-            echo "❌ Capacitor static library missing arm64 architecture"
+            echo "❌ Missing required arm64 architecture"
             echo "Found architectures: $ARCHS"
             exit 1
           fi
 
           echo "✅ Static framework verification passed"
           echo "Library location: $LIB_PATH"
-          echo "Supported architectures: $ARCHS"
+          echo "Architectures: $ARCHS"
 
       - name: Verify Pod Installation Results
         script: |
