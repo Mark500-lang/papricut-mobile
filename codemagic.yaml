@@ -290,17 +290,36 @@ workflows:
         script: |
           echo "=== VERIFYING STATIC FRAMEWORK SETUP ==="
           cd ios/App || { echo "❌ Failed to enter ios/App directory"; exit 1; }
-          
-          # 1. Verify Capacitor source files exist
-          CAPACITOR_SOURCE="../../node_modules/@capacitor/ios/Capacitor"
-          if [ ! -d "$CAPACITOR_SOURCE" ]; then
-            echo "❌ Capacitor iOS source not found at: $CAPACITOR_SOURCE"
-            echo "Contents of node_modules/@capacitor/ios:"
-            ls -la ../../node_modules/@capacitor/ios
+
+          # 1. Dynamically locate Capacitor installation
+          echo "ℹ️ Searching for Capacitor installation..."
+          CAPACITOR_PATHS=(
+            "../../node_modules/@capacitor/ios"
+            "../../node_modules/@capacitor/ios/Capacitor"
+            "../node_modules/@capacitor/ios"
+            "node_modules/@capacitor/ios"
+          )
+
+          CAPACITOR_DIR=""
+          for path in "${CAPACITOR_PATHS[@]}"; do
+            if [ -d "$path" ]; then
+              CAPACITOR_DIR="$path"
+              break
+            fi
+          done
+
+          if [ -z "$CAPACITOR_DIR" ]; then
+            echo "❌ Could not locate Capacitor iOS installation"
+            echo "Searched in:"
+            printf "  • %s\n" "${CAPACITOR_PATHS[@]}"
+            echo "Node modules contents:"
+            find ../../node_modules -maxdepth 2 -type d | grep capacitor || true
             exit 1
           fi
 
-          # 2. Ensure headers and modulemap exist
+          echo "✅ Found Capacitor at: $CAPACITOR_DIR"
+
+          # 2. Set up headers and modulemap
           mkdir -p Pods/Headers/Public/Capacitor
           if [ ! -f "Pods/Headers/Public/Capacitor/module.modulemap" ]; then
             cat > Pods/Headers/Public/Capacitor/module.modulemap <<'EOM'
@@ -312,12 +331,10 @@ workflows:
           EOM
           fi
 
-          # Only copy headers if they exist in node_modules
-          if [ -f "$CAPACITOR_SOURCE/Capacitor/Capacitor.h" ]; then
-            cp "$CAPACITOR_SOURCE"/Capacitor/*.h Pods/Headers/Public/Capacitor/ || true
-          fi
+          # Copy headers from wherever they are in the Capacitor installation
+          find "$CAPACITOR_DIR" -name "*.h" -exec cp {} Pods/Headers/Public/Capacitor/ \; || true
 
-          # 3. Build Capacitor static library with explicit output
+          # 3. Build with explicit scheme and search paths
           echo "ℹ️ Building Capacitor static library..."
           xcodebuild \
             -workspace App.xcworkspace \
@@ -328,20 +345,19 @@ workflows:
             MACH_O_TYPE=staticlib \
             ONLY_ACTIVE_ARCH=NO \
             SKIP_INSTALL=NO \
-            CONFIGURATION_BUILD_DIR="${PWD}/StaticLibs" \
-            build > capacitor_build.log 2>&1
+            BUILD_DIR="${PWD}/Build" \
+            OBJROOT="${PWD}/Build/Intermediates" \
+            SYMROOT="${PWD}/Build/Products" \
+            > capacitor_build.log 2>&1
 
-          if [ $? -ne 0 ]; then
-            echo "❌ Build failed"
-            grep -A10 "error:" capacitor_build.log || echo "No error details found"
-            exit 1
-          fi
-
-          # 4. Locate the built library
+          # 4. Comprehensive library search
+          echo "ℹ️ Searching for built library..."
           LIB_PATHS=(
-            "${PWD}/StaticLibs/libCapacitor.a"
+            "${PWD}/Build/Products/Release-iphoneos/Capacitor/libCapacitor.a"
+            "${PWD}/Build/Products/Release-iphoneos/libCapacitor.a"
             "${PWD}/Pods/Capacitor/libCapacitor.a"
             "${PWD}/DerivedData/Build/Products/Release-iphoneos/Capacitor/libCapacitor.a"
+            "$(find "${PWD}" -name "libCapacitor.a" | head -1)"
           )
 
           LIB_PATH=""
@@ -354,15 +370,16 @@ workflows:
 
           if [ -z "$LIB_PATH" ]; then
             echo "❌ Failed to locate built Capacitor static library"
-            echo "Searched in:"
-            printf "  • %s\n" "${LIB_PATHS[@]}"
-            echo "Build directory contents:"
+            echo "Build logs:"
+            grep -A10 "error:" capacitor_build.log || echo "No errors found in build log"
+            echo "All found .a files:"
             find "${PWD}" -name "*.a" -exec echo "  {}" \;
             exit 1
           fi
 
           echo "✅ Static framework verification passed"
           echo "Library location: $LIB_PATH"
+          echo "Library info: $(lipo -info "$LIB_PATH" 2>/dev/null || echo "Unknown architectures")"
 
       - name: Verify Pod Installation Results
         script: |
