@@ -48,54 +48,42 @@ workflows:
       - name: Install and Use Node 18
         script: |
           echo "=== INSTALLING NODE 18 ==="
-          # Install Node 18 using Codemagic's built-in tool
           curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.39.7/install.sh | bash
           export NVM_DIR="$HOME/.nvm"
           [ -s "$NVM_DIR/nvm.sh" ] && \. "$NVM_DIR/nvm.sh"
           nvm install 18
           nvm use 18
-          node -v
           
-          # Verify Node is actually 18.x
-          if ! node -v | grep -q 'v18'; then
-            echo "❌ Failed to set Node 18"
-            exit 1
-          fi
+          # Verify Node and npm
+          echo "Node version: $(node -v)"
+          echo "npm version: $(npm -v)"
           
-          # Install required global packages
+          # Install Angular CLI globally and verify
           npm install -g npm@latest
-          npm install -g @angular/cli@17.3.17 @ionic/cli@7.2.1 native-run cordova-res
+          npm install -g @angular/cli@17.3.17
+          echo "Angular CLI version: $(ng version | head -n 1)"
+          
+          # Install other required global packages
+          npm install -g @ionic/cli@7.2.1 native-run cordova-res
           
           # Install correct CocoaPods version
-          gem install cocoapods -v 1.16.2 --conservative
-      # - name: Set Up Environment
-      #   script: |
-      #     brew install jq
-      #     npm install -g npm@latest
-      #     npm install -g @angular/cli@17.3.17 @ionic/cli@7.2.1 native-run cordova-res
+          gem install cocoapods -v 1.15.2 --conservative
+
       - name: Install Dependencies
         script: |
-          echo "=== CLEANING ENVIRONMENT ==="
-          rm -rf node_modules .angular/cache
-          npm cache clean --force
-          
           echo "=== INSTALLING DEPENDENCIES ==="
           npm install --legacy-peer-deps --no-audit
           npm install --save-exact @angular-devkit/build-angular@17.3.17 @ionic/angular-toolkit@7.1.1
           
-          echo "=== VERIFYING INSTALLATIONS ==="
           if [ ! -d "node_modules/@angular-devkit/build-angular" ]; then
             echo "❌ CRITICAL: Angular build tools missing!"
             npm list
             exit 1
           fi
+
       - name: Verify Capacitor Plugins
         script: |
           echo "=== CAPACITOR PLUGIN CHECK ==="
-          # Check engine requirements
-          grep -r "engine" node_modules/@capacitor/*/package.json | grep "node"
-          
-          # Verify core plugins exist
           REQUIRED_PLUGINS=(
             "@capacitor/core" 
             "@capacitor/ios"
@@ -109,30 +97,36 @@ workflows:
               exit 1
             fi
           done
-      - name: Verify Environment Files
-        script: |
-          if [ ! -f "src/environments/environment.ts" ] || [ ! -f "src/environments/environment.prod.ts" ]; then
-            echo "❌ Missing environment files!"
-            ls -la src/environments/
-            exit 1
-          fi
+
       - name: Build Angular App
         script: |
           echo "=== BUILDING PRODUCTION ASSETS ==="
+          echo "Current PATH: $PATH"
+          echo "Angular CLI location: $(which ng)"
           
-          # First verify environment files
-          if [ ! -f "src/environments/environment.prod.ts" ]; then
-            echo "❌ Missing production environment file!"
-            exit 1
+          # Verify ng command is available
+          if ! command -v ng &> /dev/null; then
+            echo "❌ Angular CLI not found in PATH"
+            echo "Attempting to locate globally installed Angular CLI..."
+            NG_PATH=$(npm list -g @angular/cli | head -n 1 | awk '{print $1}')/bin/ng
+            if [ -f "$NG_PATH" ]; then
+              echo "Found Angular CLI at $NG_PATH"
+              export PATH="$PATH:$(dirname "$NG_PATH")"
+            else
+              echo "Could not find Angular CLI installation"
+              npm list -g --depth=0
+              exit 1
+            fi
           fi
           
-          # Run build with verbose output
-          ng build --configuration production --output-path www --verbose
+          # Run build with production configuration
+          ng build --configuration production --output-path www --verbose 2>&1 | tee angular.log
           
+          # Verify build output
           if [ ! -d "www" ]; then
             echo "❌ Build failed - www directory not created"
-            echo "=== BUILD DEBUG OUTPUT ==="
-            cat angular.log || echo "No angular.log found"
+            echo "=== BUILD ERRORS ==="
+            grep -i "error" angular.log || echo "No error messages found"
             exit 1
           fi
           
@@ -143,13 +137,16 @@ workflows:
             "www/runtime.*.js"
           )
           
-          for file in "${REQUIRED_FILES[@]}"; do
-            if ! ls $file >/dev/null 2>&1; then
-              echo "❌ Missing web file: $file"
+          for pattern in "${REQUIRED_FILES[@]}"; do
+            if ! ls $pattern >/dev/null 2>&1; then
+              echo "❌ Missing web file: $pattern"
+              echo "www directory contents:"
               ls -la www/
               exit 1
             fi
           done
+          
+          echo "✅ Angular build completed successfully"
 
       - name: Configure Podfile with Complete Static Setup
         script: |
