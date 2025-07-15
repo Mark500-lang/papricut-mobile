@@ -303,14 +303,14 @@ workflows:
               module * { export * }
             }
             EOF
-          fi
+                fi
 
           # 2. Verify umbrella header exists
           if [ ! -f "Pods/Headers/Public/Capacitor/Capacitor.h" ]; then
             echo "❌ Critical: Missing Capacitor.h umbrella header"
             echo "Copying headers from node_modules..."
             mkdir -p Pods/Headers/Public/Capacitor
-            cp ../../node_modules/@capacitor/ios/Capacitor/Capacitor/*.h Pods/Headers/Public/Capacitor/
+            cp -v ../../node_modules/@capacitor/ios/Capacitor/Capacitor/*.h Pods/Headers/Public/Capacitor/
           fi
 
           # 3. Verify Pods project is configured for static libs
@@ -322,34 +322,45 @@ workflows:
 
           # 4. Build Capacitor static library explicitly
           echo "Building Capacitor static library..."
-          xcodebuild -workspace App.xcworkspace \
-                    -scheme Capacitor \
-                    -configuration Release \
-                    -sdk iphoneos \
-                    BUILD_LIBRARY_FOR_DISTRIBUTION=YES \
-                    MACH_O_TYPE=staticlib \
-                    ONLY_ACTIVE_ARCH=NO \
-                    SKIP_INSTALL=NO \
-                    build | tee capacitor_build.log
+          set -o pipefail && xcodebuild \
+            -workspace App.xcworkspace \
+            -scheme Capacitor \
+            -configuration Release \
+            -sdk iphoneos \
+            BUILD_LIBRARY_FOR_DISTRIBUTION=YES \
+            MACH_O_TYPE=staticlib \
+            ONLY_ACTIVE_ARCH=NO \
+            SKIP_INSTALL=NO \
+            build | tee capacitor_build.log
           
-          # 5. Verify the static library was created
-          LIB_PATH=$(find "${PWD}/Pods" -name "libCapacitor.a" | head -1)
-          if [ -z "$LIB_PATH" ]; then
+          # Check build result
+          if [ $? -ne 0 ]; then
             echo "❌ Failed to build Capacitor static library"
             echo "=== BUILD ERRORS ==="
             grep -A5 -B5 "error:" capacitor_build.log | grep -v "errors generated" | head -50
             exit 1
           fi
 
+          # 5. Verify the static library was created
+          LIB_PATH=$(find "${PWD}" -name "libCapacitor.a" | head -1)
+          if [ -z "${LIB_PATH}" ]; then
+            echo "❌ Failed to find built Capacitor static library"
+            echo "Searching in:"
+            find "${PWD}/Pods" -name "*.a" -exec echo "  {}" \;
+            exit 1
+          fi
+
           # 6. Verify architectures in the static library
-          ARCHS=$(lipo -info "$LIB_PATH" 2>/dev/null | awk -F': ' '{print $2}')
-          if [[ ! "$ARCHS" =~ "arm64" ]]; then
+          ARCHS=$(lipo -info "${LIB_PATH}" 2>/dev/null | awk -F': ' '{print $2}')
+          if [[ ! "${ARCHS}" =~ "arm64" ]]; then
             echo "❌ Capacitor static library missing arm64 architecture"
-            echo "Found architectures: $ARCHS"
+            echo "Found architectures: ${ARCHS}"
             exit 1
           fi
 
           echo "✅ Static framework setup verified"
+          echo "Library path: ${LIB_PATH}"
+          echo "Architectures: ${ARCHS}"
 
       - name: Verify Pod Installation Results
         script: |
