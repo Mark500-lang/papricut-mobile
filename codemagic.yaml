@@ -286,58 +286,83 @@ workflows:
           
           echo "✅ Static framework infrastructure verified"
 
-      # - name: Build with Static Framework Support
-      #   script: |
-      #     echo "=== BUILDING WITH STATIC FRAMEWORK SUPPORT ==="
-      #     cd ios/App
+      - name: Verify Static Framework Setup
+        script: |
+          echo "=== VERIFYING STATIC FRAMEWORK SETUP ==="
+          cd ios/App || { echo "❌ Failed to enter ios/App directory"; exit 1; }
           
-      #     # 1. Configure static framework infrastructure
-      #     mkdir -p Pods/Headers/Public/Capacitor
-      #     [ -f "Pods/Headers/Public/Capacitor/module.modulemap" ] || cat > Pods/Headers/Public/Capacitor/module.modulemap <<'END'
-      #     framework module Capacitor {
-      #       umbrella header "Capacitor.h"
-      #       export *
-      #       module * { export * }
-      #     }
-      #     END
+          # 1. Verify Capacitor source files exist
+          CAPACITOR_SOURCE="../../node_modules/@capacitor/ios/Capacitor"
+          if [ ! -d "$CAPACITOR_SOURCE" ]; then
+            echo "❌ Capacitor iOS source not found at: $CAPACITOR_SOURCE"
+            echo "Contents of node_modules/@capacitor/ios:"
+            ls -la ../../node_modules/@capacitor/ios
+            exit 1
+          fi
 
-      #     # 2. Ensure Pods are not code signed (for static frameworks)
-      #     find Pods -name project.pbxproj -exec sed -i '' 's/CODE_SIGNING_ALLOWED = .*/CODE_SIGNING_ALLOWED = NO;/g' {} \;
-      #     find Pods -name project.pbxproj -exec sed -i '' 's/CODE_SIGNING_REQUIRED = .*/CODE_SIGNING_REQUIRED = NO;/g' {} \;
+          # 2. Ensure headers and modulemap exist
+          mkdir -p Pods/Headers/Public/Capacitor
+          if [ ! -f "Pods/Headers/Public/Capacitor/module.modulemap" ]; then
+            cat > Pods/Headers/Public/Capacitor/module.modulemap <<'EOM'
+          framework module Capacitor {
+            umbrella header "Capacitor.h"
+            export *
+            module * { export * }
+          }
+          EOM
+          fi
 
-      #     # 3. Build with proper signing configuration
-      #     xcodebuild \
-      #       -workspace App.xcworkspace \
-      #       -scheme App \
-      #       -configuration Release \
-      #       -sdk iphoneos \
-      #       -archivePath "$HOME/build/App.xcarchive" \
-      #       -destination 'generic/platform=iOS' \
-      #       -allowProvisioningUpdates \
-      #       DEVELOPMENT_TEAM="$TEAM_ID" \
-      #       PRODUCT_BUNDLE_IDENTIFIER="$BUNDLE_ID" \
-      #       CODE_SIGN_STYLE="Manual" \
-      #       CODE_SIGN_IDENTITY="iPhone Distribution" \
-      #       PROVISIONING_PROFILE_SPECIFIER="$PROFILE_NAME" \
-      #       BUILD_LIBRARY_FOR_DISTRIBUTION=YES \
-      #       MACH_O_TYPE=staticlib \
-      #       ONLY_ACTIVE_ARCH=NO \
-      #       SKIP_INSTALL=NO \
-      #       OTHER_LDFLAGS="-ObjC -all_load -lCapacitor -lCapacitorCordova" \
-      #       LIBRARY_SEARCH_PATHS="\$(inherited) ${PWD}/Pods/Capacitor ${PWD}/Pods/CapacitorCordova" \
-      #       GCC_PREPROCESSOR_DEFINITIONS="\$(inherited) CAPACITOR_ENABLE_STATIC_FRAMEWORK=1" \
-      #       archive | tee xcodebuild.log
+          # Only copy headers if they exist in node_modules
+          if [ -f "$CAPACITOR_SOURCE/Capacitor/Capacitor.h" ]; then
+            cp "$CAPACITOR_SOURCE"/Capacitor/*.h Pods/Headers/Public/Capacitor/ || true
+          fi
 
-      #     # Verify archive was created
-      #     if [ ! -d "$HOME/build/App.xcarchive" ]; then
-      #       echo "❌ Archive creation failed"
-      #       echo "=== BUILD ERRORS ==="
-      #       grep -A10 -B5 "error:" xcodebuild.log || echo "No explicit errors found"
-      #       exit 1
-      #     fi
+          # 3. Build Capacitor static library with explicit output
+          echo "ℹ️ Building Capacitor static library..."
+          xcodebuild \
+            -workspace App.xcworkspace \
+            -scheme Capacitor \
+            -configuration Release \
+            -sdk iphoneos \
+            BUILD_LIBRARY_FOR_DISTRIBUTION=YES \
+            MACH_O_TYPE=staticlib \
+            ONLY_ACTIVE_ARCH=NO \
+            SKIP_INSTALL=NO \
+            CONFIGURATION_BUILD_DIR="${PWD}/StaticLibs" \
+            build > capacitor_build.log 2>&1
 
-      #     echo "✅ Build completed successfully"
-      #     echo "Archive created at: $HOME/build/App.xcarchive"
+          if [ $? -ne 0 ]; then
+            echo "❌ Build failed"
+            grep -A10 "error:" capacitor_build.log || echo "No error details found"
+            exit 1
+          fi
+
+          # 4. Locate the built library
+          LIB_PATHS=(
+            "${PWD}/StaticLibs/libCapacitor.a"
+            "${PWD}/Pods/Capacitor/libCapacitor.a"
+            "${PWD}/DerivedData/Build/Products/Release-iphoneos/Capacitor/libCapacitor.a"
+          )
+
+          LIB_PATH=""
+          for path in "${LIB_PATHS[@]}"; do
+            if [ -f "$path" ]; then
+              LIB_PATH="$path"
+              break
+            fi
+          done
+
+          if [ -z "$LIB_PATH" ]; then
+            echo "❌ Failed to locate built Capacitor static library"
+            echo "Searched in:"
+            printf "  • %s\n" "${LIB_PATHS[@]}"
+            echo "Build directory contents:"
+            find "${PWD}" -name "*.a" -exec echo "  {}" \;
+            exit 1
+          fi
+
+          echo "✅ Static framework verification passed"
+          echo "Library location: $LIB_PATH"
 
       - name: Verify Pod Installation Results
         script: |
