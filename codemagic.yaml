@@ -187,6 +187,8 @@ workflows:
                   if target.name.start_with?('Capacitor')
                     config.build_settings['SWIFT_VERSION'] = '5.0'
                     config.build_settings['ALWAYS_EMBED_SWIFT_STANDARD_LIBRARIES'] = 'NO'
+                    config.build_settings['DEFINES_MODULE'] = 'YES'
+                    config.build_settings['MODULEMAP_FILE'] = '${PODS_ROOT}/Headers/Public/Capacitor/module.modulemap'
                   end
                 end
               end
@@ -198,12 +200,48 @@ workflows:
             end
           end
           EOF
+      - name: Fix Pods Project Corruption
+        script: |
+          echo "=== FIXING PODS PROJECT CORRUPTION ==="
+          cd ios/App
           
-          echo "=== RUNNING POD INSTALL WITH CLEAN BUILD ==="
-          cd ios/App && \
-          rm -rf Pods Podfile.lock && \
-          pod install --clean-install --repo-update && \
-          cd ../..
+          # Repair potentially corrupted project file
+          if [ -f "Pods/Pods.xcodeproj/project.pbxproj" ]; then
+            plutil -convert xml1 Pods/Pods.xcodeproj/project.pbxproj -o Pods/Pods.xcodeproj/project_repaired.pbxproj
+            mv Pods/Pods.xcodeproj/project_repaired.pbxproj Pods/Pods.xcodeproj/project.pbxproj
+          fi
+          
+          # Ensure proper module map for Capacitor
+          mkdir -p Pods/Headers/Public/Capacitor
+          cat <<EOF > Pods/Headers/Public/Capacitor/module.modulemap
+          framework module Capacitor {
+            umbrella header "Capacitor.h"
+            export *
+            module * { export * }
+          }
+          EOF
+          
+          echo "✅ Pods project repaired"
+
+      - name: Verify Static Framework Setup
+        script: |
+          echo "=== VERIFYING STATIC FRAMEWORK CONFIGURATION ==="
+          cd ios/App
+          
+          # Check Capacitor static library exists
+          if ! find Pods -name "libCapacitor.a" | grep -q "libCapacitor.a"; then
+            echo "❌ Capacitor static library not found"
+            find Pods -name "*.a" | head -20
+            exit 1
+          fi
+          
+          # Update AppDelegate.swift for static imports
+          if [ -f "App/AppDelegate.swift" ]; then
+            sed -i '' 's/^import Capacitor$/@_implementationOnly import Capacitor/g' App/AppDelegate.swift
+            echo "Updated AppDelegate.swift for static linking"
+          fi
+          
+          echo "✅ Static framework configuration verified"
       - name: Clean Derived Data
         script: |
           echo "=== CLEANING DERIVED DATA ==="
@@ -609,6 +647,9 @@ workflows:
           
           # 3. Build with manual signing only for main app
           echo "=== STARTING XCODEBUILD ==="
+          export CAPACITOR_IOS_POD_PATH=$(pwd)/ios/App/Pods/Capacitor
+          export CAPACITOR_LIB_SEARCH_PATHS=$(pwd)/ios/App/Pods/Capacitor/Static
+          
           set -o pipefail && xcodebuild \
                     -workspace "$XCODE_WORKSPACE" \
                     -scheme "$XCODE_SCHEME" \
@@ -627,7 +668,9 @@ workflows:
                     ENABLE_BITCODE=NO \
                     BUILD_LIBRARY_FOR_DISTRIBUTION=YES \
                     SKIP_INSTALL=NO \
-                    OTHER_LDFLAGS="-ObjC -all_load" \
+                    OTHER_LDFLAGS="-ObjC -all_load -lCapacitor" \
+                    LIBRARY_SEARCH_PATHS="\$(inherited) $CAPACITOR_IOS_POD_PATH" \
+                    FRAMEWORK_SEARCH_PATHS="\$(inherited) $CAPACITOR_IOS_POD_PATH" \
                     LD_RUNPATH_SEARCH_PATHS="@executable_path/Frameworks" \
                     ONLY_ACTIVE_ARCH=NO \
                     archive | tee "$HOME/build/xcodebuild.log"
