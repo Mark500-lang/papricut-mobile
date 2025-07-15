@@ -143,19 +143,17 @@ workflows:
           pod --version
       - name: Configure Podfile
         script: |
-          echo "=== UPDATING PODFILE WITH OPTIMIZED STATIC LINKING ==="
+          echo "=== UPDATING PODFILE WITH COMPLETE CONFIG ==="
           cat << 'EOF' > ios/App/Podfile
           use_frameworks! :linkage => :static
           use_modular_headers!
           
           platform :ios, '13.0'
           
-          # Disable input/output paths for Xcode caching
           install! 'cocoapods', 
             :disable_input_output_paths => true,
             :generate_multiple_pod_projects => true
           
-          # Explicit static framework configuration
           def capacitor_pods
             pod 'Capacitor', :path => '../../node_modules/@capacitor/ios', 
                 :modular_headers => true,
@@ -163,12 +161,9 @@ workflows:
             pod 'CapacitorCordova', :path => '../../node_modules/@capacitor/ios', 
                 :modular_headers => true,
                 :linkage => :static
-            
-            # Plugin pods
             pod 'CapacitorApp', :path => '../../node_modules/@capacitor/app'
             pod 'CapacitorCamera', :path => '../../node_modules/@capacitor/camera'
             pod 'CapacitorKeyboard', :path => '../../node_modules/@capacitor/keyboard'
-            # Add other plugins as needed
           end
           
           target 'App' do
@@ -179,18 +174,23 @@ workflows:
             require_relative '../../node_modules/@capacitor/ios/scripts/pods_helpers'
             assertDeploymentTarget(installer)
             
+            # Static linking settings
             installer.pods_project.targets.each do |target|
               target.build_configurations.each do |config|
-                # Essential static linking settings
                 config.build_settings['MACH_O_TYPE'] = 'staticlib'
                 config.build_settings['OTHER_LDFLAGS'] = '$(inherited) -ObjC'
                 config.build_settings['GENERATE_INFOPLIST_FILE'] = 'YES'
-                
-                # Ensure static frameworks are embedded
                 config.build_settings['SKIP_INSTALL'] = 'NO'
                 config.build_settings['BUILD_LIBRARY_FOR_DISTRIBUTION'] = 'YES'
                 
-                # Swift compatibility
+                # Disable code signing for all pods
+                config.build_settings['CODE_SIGNING_ALLOWED'] = 'NO'
+                config.build_settings['CODE_SIGNING_REQUIRED'] = 'NO'
+                config.build_settings['CODE_SIGN_IDENTITY'] = ''
+                config.build_settings['CODE_SIGN_STYLE'] = 'Automatic'
+                config.build_settings['PROVISIONING_PROFILE_SPECIFIER'] = ''
+                config.build_settings['PROVISIONING_PROFILE'] = ''
+                
                 if target.name.start_with?('Capacitor')
                   config.build_settings['SWIFT_VERSION'] = '5.0'
                   config.build_settings['ALWAYS_EMBED_SWIFT_STANDARD_LIBRARIES'] = 'NO'
@@ -198,7 +198,6 @@ workflows:
               end
             end
             
-            # Xcode 14+ compatibility
             installer.pods_project.build_configurations.each do |config|
               config.build_settings['ONLY_ACTIVE_ARCH'] = 'NO'
             end
@@ -418,28 +417,6 @@ workflows:
           done
           
           echo "✅ Pods project configured"
-      - name: Prevent Pod Signing Configuration
-        script: |
-          echo "=== PREVENTING POD SIGNING CONFIGURATION ==="
-          # Add to Podfile post_install hook
-          cat << 'EOF' >> ios/App/Podfile
-          
-          post_install do |installer|
-            installer.pods_project.targets.each do |target|
-              target.build_configurations.each do |config|
-                  config.build_settings['CODE_SIGNING_ALLOWED'] = 'NO'
-                  config.build_settings['CODE_SIGNING_REQUIRED'] = 'NO'
-                  config.build_settings['CODE_SIGN_IDENTITY'] = ''
-                  config.build_settings['CODE_SIGN_STYLE'] = 'Automatic'
-                  config.build_settings['PROVISIONING_PROFILE_SPECIFIER'] = ''
-                  config.build_settings['PROVISIONING_PROFILE'] = ''
-              end
-            end
-          end
-          EOF
-          
-          # Re-run pod install with these settings
-          cd ios/App && pod install && cd ../..
       - name: Verify Pod Installation
         script: |
           echo "=== POD INSTALLATION VERIFICATION ==="
