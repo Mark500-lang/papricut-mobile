@@ -49,59 +49,49 @@ workflows:
         script: |
           echo "=== INSTALLING NODE 18 ==="
           
-          # Clean up any previous installations
-          rm -rf ~/.nvm
-          rm -rf ~/.npm
-          rm -rf /usr/local/lib/node_modules
+          # 1. Install Node.js using Codemagic's preferred method (not nvm)
+          echo "Installing Node.js 18 directly..."
+          curl -o node.pkg https://nodejs.org/dist/v18.20.2/node-v18.20.2.pkg
+          sudo installer -pkg node.pkg -target /
+          rm node.pkg
           
-          # Install Node using Codemagic's preferred method
-          curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.39.7/install.sh | bash
-          export NVM_DIR="$HOME/.nvm"
-          [ -s "$NVM_DIR/nvm.sh" ] && \. "$NVM_DIR/nvm.sh"
-          
-          # Install specific Node version
-          nvm install 18.20.2
-          nvm use 18.20.2
-          
-          # Verify Node installation
-          if ! node -v | grep -q 'v18'; then
-            echo "❌ Failed to set Node 18"
-            exit 1
-          fi
-          
-          # Set up npm with correct permissions
+          # 2. Set up npm with correct permissions
+          echo "Configuring npm..."
           mkdir -p ~/.npm-global
           npm config set prefix '~/.npm-global'
           export PATH=~/.npm-global/bin:$PATH
+          echo "export PATH=~/.npm-global/bin:\$PATH" >> ~/.zshrc
+          echo "export PATH=~/.npm-global/bin:\$PATH" >> ~/.bashrc
           
-          # Install specific npm version that works with Node 18
+          # 3. Install specific npm version
           npm install -g npm@8.19.4
           
-          # Install Angular CLI and verify installation
-          npm install -g @angular/cli@17.3.17
-          NG_PATH=$(npm root -g)/@angular/cli/bin/ng
+          # 4. Install Angular CLI with exact version
+          echo "Installing Angular CLI..."
+          npm install -g @angular/cli@17.3.17 --force
+          
+          # 5. Verify Angular CLI installation
+          NG_PATH=~/.npm-global/bin/ng
           if [ ! -f "$NG_PATH" ]; then
-            echo "❌ Angular CLI installation failed"
+            echo "❌ Angular CLI installation failed - binary not found"
+            echo "Global npm packages:"
             npm list -g --depth=0
             exit 1
           fi
           
-          # Add Angular CLI to PATH
-          export PATH="$PATH:$(npm root -g)/@angular/cli/bin"
-          echo "export PATH=\"\$PATH:$(npm root -g)/@angular/cli/bin\"" >> ~/.zshrc
-          echo "export PATH=\"\$PATH:$(npm root -g)/@angular/cli/bin\"" >> ~/.bashrc
-          
-          # Install other required tools
+          # 6. Install other required tools
           npm install -g @ionic/cli@7.2.1 native-run cordova-res
           
-          # Install CocoaPods
+          # 7. Install CocoaPods
           gem install cocoapods -v 1.15.2 --conservative
           
-          # Verify installations
+          # 8. Verify installations
+          echo "=== INSTALLATION VERIFICATION ==="
           echo "Node version: $(node -v)"
           echo "npm version: $(npm -v)"
-          echo "Angular CLI version: $(ng version | head -n 1)"
-          echo "Angular CLI path: $(which ng)"
+          echo "Angular CLI version: $(~/.npm-global/bin/ng version | head -n 1)"
+          echo "Angular CLI path: $(which ng || echo 'Not in PATH')"
+          echo "Full PATH: $PATH"
 
       - name: Install Dependencies
         script: |
@@ -136,27 +126,16 @@ workflows:
         script: |
           echo "=== BUILDING PRODUCTION ASSETS ==="
           
-          # Ensure PATH includes global npm binaries
+          # Ensure PATH is set correctly
           export PATH=~/.npm-global/bin:$PATH
-          export PATH="$PATH:$(npm root -g)/@angular/cli/bin"
           
           # Verify ng command is available
           if ! command -v ng &> /dev/null; then
             echo "❌ Angular CLI not found in PATH"
             echo "Current PATH: $PATH"
-            echo "Attempting to find Angular CLI..."
-            NG_PATH=$(npm root -g)/@angular/cli/bin/ng
-            if [ -f "$NG_PATH" ]; then
-              echo "Found Angular CLI at: $NG_PATH"
-              $NG_PATH version
-              $NG_PATH build --configuration production --output-path www --verbose 2>&1 | tee angular.log
-            else
-              echo "Could not locate Angular CLI"
-              npm list -g --depth=0
-              exit 1
-            fi
+            echo "Attempting direct path..."
+            ~/.npm-global/bin/ng build --configuration production --output-path www --verbose 2>&1 | tee angular.log
           else
-            echo "Using Angular CLI from: $(which ng)"
             ng build --configuration production --output-path www --verbose 2>&1 | tee angular.log
           fi
           
