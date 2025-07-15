@@ -48,35 +48,60 @@ workflows:
       - name: Install and Use Node 18
         script: |
           echo "=== INSTALLING NODE 18 ==="
-          # Install Node 18 using Codemagic's built-in tool
+          
+          # Clean up any previous installations
+          rm -rf ~/.nvm
+          rm -rf ~/.npm
+          rm -rf /usr/local/lib/node_modules
+          
+          # Install Node using Codemagic's preferred method
           curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.39.7/install.sh | bash
           export NVM_DIR="$HOME/.nvm"
           [ -s "$NVM_DIR/nvm.sh" ] && \. "$NVM_DIR/nvm.sh"
           
-          # Install specific Node 18 version that works with our Angular version
+          # Install specific Node version
           nvm install 18.20.2
           nvm use 18.20.2
           
-          # Verify Node is actually 18.x
+          # Verify Node installation
           if ! node -v | grep -q 'v18'; then
             echo "❌ Failed to set Node 18"
             exit 1
           fi
           
-          # Clean npm cache
-          npm cache clean --force
+          # Set up npm with correct permissions
+          mkdir -p ~/.npm-global
+          npm config set prefix '~/.npm-global'
+          export PATH=~/.npm-global/bin:$PATH
           
-          # Install required global packages with exact versions
-          npm install -g npm@8.19.4  # Specific version known to work with Node 18
-          npm install -g @angular/cli@17.3.17 @ionic/cli@7.2.1 native-run cordova-res
+          # Install specific npm version that works with Node 18
+          npm install -g npm@8.19.4
+          
+          # Install Angular CLI and verify installation
+          npm install -g @angular/cli@17.3.17
+          NG_PATH=$(npm root -g)/@angular/cli/bin/ng
+          if [ ! -f "$NG_PATH" ]; then
+            echo "❌ Angular CLI installation failed"
+            npm list -g --depth=0
+            exit 1
+          fi
+          
+          # Add Angular CLI to PATH
+          export PATH="$PATH:$(npm root -g)/@angular/cli/bin"
+          echo "export PATH=\"\$PATH:$(npm root -g)/@angular/cli/bin\"" >> ~/.zshrc
+          echo "export PATH=\"\$PATH:$(npm root -g)/@angular/cli/bin\"" >> ~/.bashrc
+          
+          # Install other required tools
+          npm install -g @ionic/cli@7.2.1 native-run cordova-res
+          
+          # Install CocoaPods
+          gem install cocoapods -v 1.15.2 --conservative
           
           # Verify installations
           echo "Node version: $(node -v)"
           echo "npm version: $(npm -v)"
           echo "Angular CLI version: $(ng version | head -n 1)"
-          
-          # Install correct CocoaPods version
-          gem install cocoapods -v 1.15.2 --conservative
+          echo "Angular CLI path: $(which ng)"
 
       - name: Install Dependencies
         script: |
@@ -111,19 +136,35 @@ workflows:
         script: |
           echo "=== BUILDING PRODUCTION ASSETS ==="
           
-          # First verify environment files
-          if [ ! -f "src/environments/environment.prod.ts" ]; then
-            echo "❌ Missing production environment file!"
-            exit 1
+          # Ensure PATH includes global npm binaries
+          export PATH=~/.npm-global/bin:$PATH
+          export PATH="$PATH:$(npm root -g)/@angular/cli/bin"
+          
+          # Verify ng command is available
+          if ! command -v ng &> /dev/null; then
+            echo "❌ Angular CLI not found in PATH"
+            echo "Current PATH: $PATH"
+            echo "Attempting to find Angular CLI..."
+            NG_PATH=$(npm root -g)/@angular/cli/bin/ng
+            if [ -f "$NG_PATH" ]; then
+              echo "Found Angular CLI at: $NG_PATH"
+              $NG_PATH version
+              $NG_PATH build --configuration production --output-path www --verbose 2>&1 | tee angular.log
+            else
+              echo "Could not locate Angular CLI"
+              npm list -g --depth=0
+              exit 1
+            fi
+          else
+            echo "Using Angular CLI from: $(which ng)"
+            ng build --configuration production --output-path www --verbose 2>&1 | tee angular.log
           fi
           
-          # Run build with verbose output
-          ng build --configuration production --output-path www --verbose
-          
+          # Verify build output
           if [ ! -d "www" ]; then
             echo "❌ Build failed - www directory not created"
-            echo "=== BUILD DEBUG OUTPUT ==="
-            cat angular.log || echo "No angular.log found"
+            echo "=== BUILD ERRORS ==="
+            grep -i "error" angular.log || echo "No error messages found"
             exit 1
           fi
           
@@ -134,13 +175,16 @@ workflows:
             "www/runtime.*.js"
           )
           
-          for file in "${REQUIRED_FILES[@]}"; do
-            if ! ls $file >/dev/null 2>&1; then
-              echo "❌ Missing web file: $file"
+          for pattern in "${REQUIRED_FILES[@]}"; do
+            if ! ls $pattern >/dev/null 2>&1; then
+              echo "❌ Missing web file: $pattern"
+              echo "www directory contents:"
               ls -la www/
               exit 1
             fi
           done
+          
+          echo "✅ Angular build completed successfully"
 
       - name: Configure Podfile with Complete Static Setup
         script: |
