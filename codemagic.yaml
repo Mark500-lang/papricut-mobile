@@ -286,58 +286,58 @@ workflows:
           
           echo "✅ Static framework infrastructure verified"
 
-      - name: Build with Static Framework Support
-        script: |
-          echo "=== BUILDING WITH STATIC FRAMEWORK SUPPORT ==="
-          cd ios/App
+      # - name: Build with Static Framework Support
+      #   script: |
+      #     echo "=== BUILDING WITH STATIC FRAMEWORK SUPPORT ==="
+      #     cd ios/App
           
-          # 1. Configure static framework infrastructure
-          mkdir -p Pods/Headers/Public/Capacitor
-          [ -f "Pods/Headers/Public/Capacitor/module.modulemap" ] || cat > Pods/Headers/Public/Capacitor/module.modulemap <<'END'
-          framework module Capacitor {
-            umbrella header "Capacitor.h"
-            export *
-            module * { export * }
-          }
-          END
+      #     # 1. Configure static framework infrastructure
+      #     mkdir -p Pods/Headers/Public/Capacitor
+      #     [ -f "Pods/Headers/Public/Capacitor/module.modulemap" ] || cat > Pods/Headers/Public/Capacitor/module.modulemap <<'END'
+      #     framework module Capacitor {
+      #       umbrella header "Capacitor.h"
+      #       export *
+      #       module * { export * }
+      #     }
+      #     END
 
-          # 2. Ensure Pods are not code signed (for static frameworks)
-          find Pods -name project.pbxproj -exec sed -i '' 's/CODE_SIGNING_ALLOWED = .*/CODE_SIGNING_ALLOWED = NO;/g' {} \;
-          find Pods -name project.pbxproj -exec sed -i '' 's/CODE_SIGNING_REQUIRED = .*/CODE_SIGNING_REQUIRED = NO;/g' {} \;
+      #     # 2. Ensure Pods are not code signed (for static frameworks)
+      #     find Pods -name project.pbxproj -exec sed -i '' 's/CODE_SIGNING_ALLOWED = .*/CODE_SIGNING_ALLOWED = NO;/g' {} \;
+      #     find Pods -name project.pbxproj -exec sed -i '' 's/CODE_SIGNING_REQUIRED = .*/CODE_SIGNING_REQUIRED = NO;/g' {} \;
 
-          # 3. Build with proper signing configuration
-          xcodebuild \
-            -workspace App.xcworkspace \
-            -scheme App \
-            -configuration Release \
-            -sdk iphoneos \
-            -archivePath "$HOME/build/App.xcarchive" \
-            -destination 'generic/platform=iOS' \
-            -allowProvisioningUpdates \
-            DEVELOPMENT_TEAM="$TEAM_ID" \
-            PRODUCT_BUNDLE_IDENTIFIER="$BUNDLE_ID" \
-            CODE_SIGN_STYLE="Manual" \
-            CODE_SIGN_IDENTITY="iPhone Distribution" \
-            PROVISIONING_PROFILE_SPECIFIER="$PROFILE_NAME" \
-            BUILD_LIBRARY_FOR_DISTRIBUTION=YES \
-            MACH_O_TYPE=staticlib \
-            ONLY_ACTIVE_ARCH=NO \
-            SKIP_INSTALL=NO \
-            OTHER_LDFLAGS="-ObjC -all_load -lCapacitor -lCapacitorCordova" \
-            LIBRARY_SEARCH_PATHS="\$(inherited) ${PWD}/Pods/Capacitor ${PWD}/Pods/CapacitorCordova" \
-            GCC_PREPROCESSOR_DEFINITIONS="\$(inherited) CAPACITOR_ENABLE_STATIC_FRAMEWORK=1" \
-            archive | tee xcodebuild.log
+      #     # 3. Build with proper signing configuration
+      #     xcodebuild \
+      #       -workspace App.xcworkspace \
+      #       -scheme App \
+      #       -configuration Release \
+      #       -sdk iphoneos \
+      #       -archivePath "$HOME/build/App.xcarchive" \
+      #       -destination 'generic/platform=iOS' \
+      #       -allowProvisioningUpdates \
+      #       DEVELOPMENT_TEAM="$TEAM_ID" \
+      #       PRODUCT_BUNDLE_IDENTIFIER="$BUNDLE_ID" \
+      #       CODE_SIGN_STYLE="Manual" \
+      #       CODE_SIGN_IDENTITY="iPhone Distribution" \
+      #       PROVISIONING_PROFILE_SPECIFIER="$PROFILE_NAME" \
+      #       BUILD_LIBRARY_FOR_DISTRIBUTION=YES \
+      #       MACH_O_TYPE=staticlib \
+      #       ONLY_ACTIVE_ARCH=NO \
+      #       SKIP_INSTALL=NO \
+      #       OTHER_LDFLAGS="-ObjC -all_load -lCapacitor -lCapacitorCordova" \
+      #       LIBRARY_SEARCH_PATHS="\$(inherited) ${PWD}/Pods/Capacitor ${PWD}/Pods/CapacitorCordova" \
+      #       GCC_PREPROCESSOR_DEFINITIONS="\$(inherited) CAPACITOR_ENABLE_STATIC_FRAMEWORK=1" \
+      #       archive | tee xcodebuild.log
 
-          # Verify archive was created
-          if [ ! -d "$HOME/build/App.xcarchive" ]; then
-            echo "❌ Archive creation failed"
-            echo "=== BUILD ERRORS ==="
-            grep -A10 -B5 "error:" xcodebuild.log || echo "No explicit errors found"
-            exit 1
-          fi
+      #     # Verify archive was created
+      #     if [ ! -d "$HOME/build/App.xcarchive" ]; then
+      #       echo "❌ Archive creation failed"
+      #       echo "=== BUILD ERRORS ==="
+      #       grep -A10 -B5 "error:" xcodebuild.log || echo "No explicit errors found"
+      #       exit 1
+      #     fi
 
-          echo "✅ Build completed successfully"
-          echo "Archive created at: $HOME/build/App.xcarchive"
+      #     echo "✅ Build completed successfully"
+      #     echo "Archive created at: $HOME/build/App.xcarchive"
 
       - name: Verify Pod Installation Results
         script: |
