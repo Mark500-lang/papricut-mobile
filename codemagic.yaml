@@ -143,7 +143,7 @@ workflows:
           pod --version
       - name: Configure Podfile
         script: |
-          echo "=== UPDATING PODFILE WITH STATIC BUILD SETTINGS ==="
+          echo "=== UPDATING PODFILE WITH STATIC LIBRARY SETTINGS ==="
           cat << 'EOF' > ios/App/Podfile
           use_frameworks! :linkage => :static
           use_modular_headers!
@@ -168,22 +168,18 @@ workflows:
           target 'App' do
             capacitor_pods
             
-            # Explicit static framework settings
             post_install do |installer|
               require_relative '../../node_modules/@capacitor/ios/scripts/pods_helpers'
               assertDeploymentTarget(installer)
               
-              installer.pods_project.build_configurations.each do |config|
-                config.build_settings['BUILD_LIBRARY_FOR_DISTRIBUTION'] = 'YES'
-                config.build_settings['MACH_O_TYPE'] = 'staticlib'
-                config.build_settings['SKIP_INSTALL'] = 'YES'
-              end
-              
+              # Force static library output
               installer.pods_project.targets.each do |target|
                 target.build_configurations.each do |config|
-                  # Static framework specific settings
+                  # Ensure static library output
+                  config.build_settings['MACH_O_TYPE'] = 'staticlib'
                   config.build_settings['OTHER_LDFLAGS'] = '$(inherited) -ObjC'
-                  config.build_settings['GENERATE_INFOPLIST_FILE'] = 'YES'
+                  config.build_settings['BUILD_LIBRARY_FOR_DISTRIBUTION'] = 'YES'
+                  config.build_settings['SKIP_INSTALL'] = 'NO'
                   
                   # Disable code signing for pods
                   config.build_settings['CODE_SIGNING_ALLOWED'] = 'NO'
@@ -196,6 +192,12 @@ workflows:
                   end
                 end
               end
+              
+              # Additional static framework settings
+              installer.pods_project.build_configurations.each do |config|
+                config.build_settings['ONLY_ACTIVE_ARCH'] = 'NO'
+                config.build_settings['GENERATE_INFOPLIST_FILE'] = 'YES'
+              end
             end
           end
           EOF
@@ -205,43 +207,53 @@ workflows:
           rm -rf Pods Podfile.lock && \
           pod install --clean-install --repo-update && \
           cd ../..
+      - name: Build Verification
+        script: |
+          echo "=== BUILD VERIFICATION ==="
+          
+          # Check the actual file type of built products
+          DERIVED_DATA_DIR="$HOME/Library/Developer/Xcode/DerivedData"
+          find "$DERIVED_DATA_DIR" -name "Capacitor*" -type f | while read file; do
+            echo "Checking: $file"
+            file "$file" || true
+          done
+          
+          # Verify the main app will link against static libraries
+          if grep -q "use_frameworks! :linkage => :static" ios/App/Podfile; then
+            echo "✅ Static linkage configured in Podfile"
+          else
+            echo "❌ Missing static linkage configuration"
+            exit 1
+          fi
       - name: Verify Pod Installation
         script: |
           echo "=== POD INSTALLATION VERIFICATION ==="
           
-          # Check for built static libraries in derived data
+          # Check for static libraries in derived data
           DERIVED_DATA_DIR="$HOME/Library/Developer/Xcode/DerivedData"
-          CAPACITOR_LIBS=$(find "$DERIVED_DATA_DIR" -name "libCapacitor.a" | head -1)
+          CAPACITOR_LIBS=$(find "$DERIVED_DATA_DIR" -name "libCapacitor.a" -o -name "Capacitor.a" | head -1)
           
           if [ -z "$CAPACITOR_LIBS" ]; then
-            echo "⚠️ Capacitor static libraries not found in standard location"
+            echo "⚠️ Capacitor static libraries not found in standard locations"
             echo "=== ALTERNATIVE LOCATIONS CHECK ==="
             
-            # Check alternative build directories
-            find ios/App/Pods -name "*.a" | xargs ls -la || echo "No static libraries found"
-            find ios/App -name "libPods-App.a" | xargs ls -la || echo "No Pods library found"
-            
-            # If still missing, attempt a manual build
-            echo "=== ATTEMPTING MANUAL BUILD ==="
-            cd ios/App && \
-            xcodebuild -workspace App.xcworkspace \
-                      -scheme Capacitor \
-                      -configuration Release \
-                      -sdk iphoneos \
-                      BUILD_LIBRARY_FOR_DISTRIBUTION=YES \
-                      SKIP_INSTALL=NO \
-                      MACH_O_TYPE=staticlib \
-                      ONLY_ACTIVE_ARCH=NO \
-                      build | tee pod_build.log
-            
-            # Verify again after manual build
-            CAPACITOR_LIBS=$(find "$DERIVED_DATA_DIR" -name "libCapacitor.a" | head -1)
-            if [ -z "$CAPACITOR_LIBS" ]; then
-              echo "❌ Failed to build Capacitor static libraries"
-              echo "Build log:"
-              cat pod_build.log | grep -A 15 "error:"
-              exit 1
+            # Check framework binary (might be static despite .framework extension)
+            FRAMEWORK_BINARY=$(find "$DERIVED_DATA_DIR" -path "*/Capacitor.framework/Capacitor" | head -1)
+            if [ -n "$FRAMEWORK_BINARY" ]; then
+              echo "Found framework binary at: $FRAMEWORK_BINARY"
+              if file "$FRAMEWORK_BINARY" | grep -q "current ar archive"; then
+                echo "✅ Framework binary is actually a static library"
+                exit 0
+              fi
             fi
+            
+            # Check for any static libraries in Pods build directory
+            find ios/App/Pods -name "*.a" | xargs ls -la || echo "No static libraries found"
+            
+            echo "❌ Failed to find valid Capacitor static libraries"
+            echo "Build products:"
+            find "$DERIVED_DATA_DIR" -name "Capacitor*" | head -20
+            exit 1
           fi
           
           echo "✅ Found static libraries at: $CAPACITOR_LIBS"
