@@ -48,42 +48,35 @@ workflows:
       - name: Install and Use Node 18
         script: |
           echo "=== INSTALLING NODE 18 ==="
+          # Install Node 18 using Codemagic's built-in tool
           curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.39.7/install.sh | bash
           export NVM_DIR="$HOME/.nvm"
           [ -s "$NVM_DIR/nvm.sh" ] && \. "$NVM_DIR/nvm.sh"
-          nvm install 18
-          nvm use 18
           
-          # Clean npm cache and verify installation
-          npm cache clean --force
-          echo "Node version: $(node -v)"
-          echo "npm version: $(npm -v)"
+          # Install specific Node 18 version that works with our Angular version
+          nvm install 18.20.2
+          nvm use 18.20.2
           
-          # Install Angular CLI globally with exact version
-          npm install -g npm@latest
-          npm install -g @angular/cli@17.3.17 --force
-          
-          # Verify Angular CLI installation
-          NG_PATH=$(npm root -g)/@angular/cli/bin/ng
-          if [ -f "$NG_PATH" ]; then
-            echo "Angular CLI installed at: $NG_PATH"
-            ln -s "$NG_PATH" /usr/local/bin/ng || true
-            export PATH="$PATH:$(npm root -g)/@angular/cli/bin"
-          else
-            echo "❌ Angular CLI installation failed"
-            npm list -g --depth=0
+          # Verify Node is actually 18.x
+          if ! node -v | grep -q 'v18'; then
+            echo "❌ Failed to set Node 18"
             exit 1
           fi
           
-          # Install other required global packages
-          npm install -g @ionic/cli@7.2.1 native-run cordova-res
+          # Clean npm cache
+          npm cache clean --force
+          
+          # Install required global packages with exact versions
+          npm install -g npm@8.19.4  # Specific version known to work with Node 18
+          npm install -g @angular/cli@17.3.17 @ionic/cli@7.2.1 native-run cordova-res
+          
+          # Verify installations
+          echo "Node version: $(node -v)"
+          echo "npm version: $(npm -v)"
+          echo "Angular CLI version: $(ng version | head -n 1)"
           
           # Install correct CocoaPods version
           gem install cocoapods -v 1.15.2 --conservative
-          
-          # Verify all installations
-          echo "Angular CLI version: $(ng version | head -n 1)"
-          echo "Ionic CLI version: $(ionic --version)"
 
       - name: Install Dependencies
         script: |
@@ -117,22 +110,20 @@ workflows:
       - name: Build Angular App
         script: |
           echo "=== BUILDING PRODUCTION ASSETS ==="
-          echo "Current PATH: $PATH"
           
-          # Try global ng first, then fall back to local npx
-          if command -v ng &> /dev/null; then
-            echo "Using global Angular CLI"
-            ng build --configuration production --output-path www --verbose 2>&1 | tee angular.log
-          else
-            echo "Using local Angular CLI via npx"
-            npx ng build --configuration production --output-path www --verbose 2>&1 | tee angular.log
+          # First verify environment files
+          if [ ! -f "src/environments/environment.prod.ts" ]; then
+            echo "❌ Missing production environment file!"
+            exit 1
           fi
           
-          # Verify build output
+          # Run build with verbose output
+          ng build --configuration production --output-path www --verbose
+          
           if [ ! -d "www" ]; then
             echo "❌ Build failed - www directory not created"
-            echo "=== BUILD ERRORS ==="
-            grep -i "error" angular.log || echo "No error messages found"
+            echo "=== BUILD DEBUG OUTPUT ==="
+            cat angular.log || echo "No angular.log found"
             exit 1
           fi
           
@@ -143,16 +134,13 @@ workflows:
             "www/runtime.*.js"
           )
           
-          for pattern in "${REQUIRED_FILES[@]}"; do
-            if ! ls $pattern >/dev/null 2>&1; then
-              echo "❌ Missing web file: $pattern"
-              echo "www directory contents:"
+          for file in "${REQUIRED_FILES[@]}"; do
+            if ! ls $file >/dev/null 2>&1; then
+              echo "❌ Missing web file: $file"
               ls -la www/
               exit 1
             fi
           done
-          
-          echo "✅ Angular build completed successfully"
 
       - name: Configure Podfile with Complete Static Setup
         script: |
