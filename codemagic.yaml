@@ -291,7 +291,7 @@ workflows:
           echo "=== BUILDING WITH STATIC FRAMEWORK SUPPORT ==="
           cd ios/App
           
-          # 1. Ensure basic structure exists
+          # 1. Configure static framework infrastructure
           mkdir -p Pods/Headers/Public/Capacitor
           [ -f "Pods/Headers/Public/Capacitor/module.modulemap" ] || cat > Pods/Headers/Public/Capacitor/module.modulemap <<'END'
           framework module Capacitor {
@@ -301,7 +301,11 @@ workflows:
           }
           END
 
-          # 2. Directly build the main app with static linking
+          # 2. Ensure Pods are not code signed (for static frameworks)
+          find Pods -name project.pbxproj -exec sed -i '' 's/CODE_SIGNING_ALLOWED = .*/CODE_SIGNING_ALLOWED = NO;/g' {} \;
+          find Pods -name project.pbxproj -exec sed -i '' 's/CODE_SIGNING_REQUIRED = .*/CODE_SIGNING_REQUIRED = NO;/g' {} \;
+
+          # 3. Build with proper signing configuration
           xcodebuild \
             -workspace App.xcworkspace \
             -scheme App \
@@ -309,6 +313,12 @@ workflows:
             -sdk iphoneos \
             -archivePath "$HOME/build/App.xcarchive" \
             -destination 'generic/platform=iOS' \
+            -allowProvisioningUpdates \
+            DEVELOPMENT_TEAM="$TEAM_ID" \
+            PRODUCT_BUNDLE_IDENTIFIER="$BUNDLE_ID" \
+            CODE_SIGN_STYLE="Manual" \
+            CODE_SIGN_IDENTITY="iPhone Distribution" \
+            PROVISIONING_PROFILE_SPECIFIER="$PROFILE_NAME" \
             BUILD_LIBRARY_FOR_DISTRIBUTION=YES \
             MACH_O_TYPE=staticlib \
             ONLY_ACTIVE_ARCH=NO \
@@ -322,7 +332,7 @@ workflows:
           if [ ! -d "$HOME/build/App.xcarchive" ]; then
             echo "❌ Archive creation failed"
             echo "=== BUILD ERRORS ==="
-            grep -A10 "error:" xcodebuild.log || echo "No explicit errors found"
+            grep -A10 -B5 "error:" xcodebuild.log || echo "No explicit errors found"
             exit 1
           fi
 
