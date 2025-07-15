@@ -513,24 +513,23 @@ workflows:
           rm -rf "$HOME/build"
           mkdir -p "$HOME/build"
           
-          # Verify provisioning profile is installed
+          # 1. Verify provisioning profile
           echo "=== VERIFYING PROVISIONING PROFILE ==="
           PROFILE_UUID=$(/usr/libexec/PlistBuddy -c 'Print UUID' /dev/stdin <<< $(security cms -D -i "$PROFILE_NAME.mobileprovision"))
           if [ ! -f "$HOME/Library/MobileDevice/Provisioning Profiles/$PROFILE_UUID.mobileprovision" ]; then
-            echo "❌ Provisioning profile not found in expected location"
-            echo "Installed profiles:"
-            ls -la "$HOME/Library/MobileDevice/Provisioning Profiles/" || echo "No profiles found"
+            echo "❌ Provisioning profile not installed correctly"
             exit 1
           fi
           
-          # Update Xcode project settings
-          echo "=== UPDATING XCODE PROJECT SETTINGS ==="
-          PBXPROJ_PATH="ios/App/App.xcodeproj/project.pbxproj"
-          /usr/libexec/PlistBuddy -c "Set :objects:13D8C11F2543F3D900D83B1E:buildSettings:PROVISIONING_PROFILE_SPECIFIER $PROFILE_NAME" "$PBXPROJ_PATH"
-          /usr/libexec/PlistBuddy -c "Set :objects:13D8C11F2543F3D900D83B1E:buildSettings:PROVISIONING_PROFILE $PROFILE_UUID" "$PBXPROJ_PATH"
-          /usr/libexec/PlistBuddy -c "Set :objects:13D8C11F2543F3D900D83B1E:buildSettings:CODE_SIGN_STYLE Manual" "$PBXPROJ_PATH"
+          # 2. Configure Pods to use automatic signing
+          echo "=== CONFIGURING PODS SIGNING ==="
+          find ios/App/Pods -name project.pbxproj | while read pbxproj; do
+            /usr/libexec/PlistBuddy -c "Set :objects:*:buildSettings:PROVISIONING_PROFILE_SPECIFIER ''" "$pbxproj" 2>/dev/null || true
+            /usr/libexec/PlistBuddy -c "Set :objects:*:buildSettings:PROVISIONING_PROFILE ''" "$pbxproj" 2>/dev/null || true
+            /usr/libexec/PlistBuddy -c "Set :objects:*:buildSettings:CODE_SIGN_STYLE Automatic" "$pbxproj" 2>/dev/null || true
+          done
           
-          # Build with enhanced logging
+          # 3. Build with manual signing only for main app
           echo "=== STARTING XCODEBUILD ==="
           xcodebuild -workspace "$XCODE_WORKSPACE" \
                     -scheme "$XCODE_SCHEME" \
@@ -554,27 +553,16 @@ workflows:
                     ONLY_ACTIVE_ARCH=NO \
                     archive | tee "$HOME/build/xcodebuild.log"
           
-          # Check exit status immediately
+          # Check exit status
           XCODE_EXIT=${PIPESTATUS[0]}
           if [ $XCODE_EXIT -ne 0 ]; then
             echo "❌ Xcode build failed with exit code $XCODE_EXIT"
-            echo "=== BUILD ERROR SUMMARY ==="
-            grep -A10 -B10 "error:" "$HOME/build/xcodebuild.log" | grep -v "errors generated" | head -50
-            
-            # Additional diagnostics
-            echo "=== PROVISIONING PROFILE DIAGNOSTICS ==="
-            security find-identity -v -p codesigning
-            echo "Installed profiles:"
-            find "$HOME/Library/MobileDevice/Provisioning Profiles" -name "*.mobileprovision" | while read f; do
-              echo "Profile: $f"
-              /usr/libexec/PlistBuddy -c 'Print :Name' /dev/stdin <<< $(security cms -D -i "$f")
-              /usr/libexec/PlistBuddy -c 'Print :UUID' /dev/stdin <<< $(security cms -D -i "$f")
-            done
-            
+            echo "=== ERROR SUMMARY ==="
+            grep -A10 -B5 "error:" "$HOME/build/xcodebuild.log" | grep -v "errors generated" | head -50
             exit $XCODE_EXIT
           fi
           
-          echo "✅ Archive created successfully at $HOME/build/App.xcarchive"
+          echo "✅ Archive created successfully"
 
       - name: Real-time Archive Monitoring
         script: |
