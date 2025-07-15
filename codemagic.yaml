@@ -165,77 +165,61 @@ workflows:
           
           echo "✅ Angular build completed successfully"
 
-      - name: Configure Podfile with Complete Static Setup
+      - name: Configure Podfile with Static Setup
         script: |
-          echo "=== UPDATING PODFILE WITH COMPLETE STATIC CONFIGURATION ==="
+          echo "=== CONFIGURING PODFILE ==="
           cat << 'EOF' > ios/App/Podfile
-          use_frameworks! :linkage => :static
-          use_modular_headers!
-          
           platform :ios, '13.0'
-          
-          install! 'cocoapods', 
-            :disable_input_output_paths => true,
-            :generate_multiple_pod_projects => true,
-            :deterministic_uuids => true
-          
-          def capacitor_pods
-            pod 'Capacitor', :path => '../../node_modules/@capacitor/ios', 
-                :modular_headers => true,
-                :configuration => ['Release']
-            pod 'CapacitorCordova', :path => '../../node_modules/@capacitor/ios', 
-                :modular_headers => true,
-                :configuration => ['Release']
-            pod 'CapacitorApp', :path => '../../node_modules/@capacitor/app',
-                :configuration => ['Release']
-            pod 'CapacitorCamera', :path => '../../node_modules/@capacitor/camera',
-                :configuration => ['Release']
-            pod 'CapacitorKeyboard', :path => '../../node_modules/@capacitor/keyboard',
-                :configuration => ['Release']
-          end
-          
+          use_frameworks! :linkage => :static
+
           target 'App' do
-            capacitor_pods
-            
-            post_install do |installer|
-              require_relative '../../node_modules/@capacitor/ios/scripts/pods_helpers'
-              assertDeploymentTarget(installer)
-              
-              installer.pods_project.build_configurations.each do |config|
+            pod 'Capacitor', :path => '../../node_modules/@capacitor/ios'
+            pod 'CapacitorCordova', :path => '../../node_modules/@capacitor/ios'
+            pod 'CapacitorApp', :path => '../../node_modules/@capacitor/app'
+            pod 'CapacitorCamera', :path => '../../node_modules/@capacitor/camera'
+            pod 'CapacitorKeyboard', :path => '../../node_modules/@capacitor/keyboard'
+          end
+
+          post_install do |installer|
+            installer.pods_project.targets.each do |target|
+              target.build_configurations.each do |config|
                 config.build_settings['BUILD_LIBRARY_FOR_DISTRIBUTION'] = 'YES'
-                config.build_settings['SKIP_INSTALL'] = 'YES'
-                config.build_settings['ONLY_ACTIVE_ARCH'] = 'NO'
-              end
-              
-              installer.pods_project.targets.each do |target|
-                target.build_configurations.each do |config|
-                  config.build_settings['MACH_O_TYPE'] = 'staticlib'
-                  config.build_settings['OTHER_LDFLAGS'] = '$(inherited) -ObjC -all_load'
-                  config.build_settings['BUILD_LIBRARY_FOR_DISTRIBUTION'] = 'YES'
-                  config.build_settings['SKIP_INSTALL'] = 'YES'
-                  config.build_settings['CODE_SIGNING_ALLOWED'] = 'NO'
-                  config.build_settings['CODE_SIGN_IDENTITY'] = ''
-                  
-                  if target.name.start_with?('Capacitor')
-                    config.build_settings['SWIFT_VERSION'] = '5.0'
-                    config.build_settings['ALWAYS_EMBED_SWIFT_STANDARD_LIBRARIES'] = 'NO'
-                    config.build_settings['DEFINES_MODULE'] = 'YES'
-                    config.build_settings['CLANG_ENABLE_MODULES'] = 'YES'
-                    config.build_settings['SWIFT_OBJC_BRIDGING_HEADER'] = '${PODS_ROOT}/Headers/Public/Capacitor/Capacitor/Capacitor-Bridging-Header.h'
-                    config.build_settings['SWIFT_INCLUDE_PATHS'] = '${PODS_ROOT}/Headers/Public/Capacitor'
-                  fi
-                  
-                  config.build_settings['FRAMEWORK_SEARCH_PATHS'] = [
-                    '$(inherited)',
-                    '$(PODS_ROOT)/Capacitor',
-                    '$(PODS_ROOT)/CapacitorCordova'
-                  ].join(' ')
+                config.build_settings['MACH_O_TYPE'] = 'staticlib'
+                config.build_settings['SKIP_INSTALL'] = 'NO'
+                config.build_settings['CODE_SIGNING_ALLOWED'] = 'NO'
+                
+                # For Capacitor targets specifically
+                if target.name.start_with?('Capacitor')
+                  config.build_settings['DEFINES_MODULE'] = 'YES'
+                  config.build_settings['SWIFT_VERSION'] = '5.0'
                 end
               end
             end
           end
           EOF
-
+      - name: Install Pods with Static Framework Support
+        script: |
+          echo "=== INSTALLING PODS ==="
+          cd ios/App
+          pod install --repo-update
+          
+          # Verify Pods were installed
+          if [ ! -d "Pods" ]; then
+            echo "❌ Pods directory not created"
+            exit 1
+          fi
+          
+          # Create required modulemap if it doesn't exist
+          mkdir -p Pods/Headers/Public/Capacitor
+          cat <<EOF > Pods/Headers/Public/Capacitor/module.modulemap
+          framework module Capacitor {
+            umbrella header "Capacitor.h"
+            export *
+            module * { export * }
+          }
+          EOF
+          
+          echo "✅ Pods installed successfully"
       - name: Setup Static Framework Infrastructure
         script: |
           echo "=== SETTING UP STATIC FRAMEWORK INFRASTRUCTURE ==="
@@ -268,30 +252,35 @@ workflows:
 
       - name: Verify Static Framework Setup
         script: |
-          echo "=== STATIC FRAMEWORK VERIFICATION ==="
+          echo "=== VERIFYING STATIC FRAMEWORKS ==="
           cd ios/App
           
-          if ! find Pods -name "libCapacitor.a" | grep -q "libCapacitor.a"; then
-            echo "❌ Capacitor static library not found"
-            xcodebuild -project Pods/Pods.xcodeproj \
-                      -target Capacitor \
-                      -configuration Release \
-                      -sdk iphoneos \
-                      BUILD_LIBRARY_FOR_DISTRIBUTION=YES \
-                      MACH_O_TYPE=staticlib \
-                      ONLY_ACTIVE_ARCH=NO \
-                      SKIP_INSTALL=NO \
-                      build
-            if ! find Pods -name "libCapacitor.a" | grep -q "libCapacitor.a"; then
-              echo "❌ Failed to build static library"
-              exit 1
-            fi
+          # First check if library exists without building
+          if find Pods -name "libCapacitor.a" | grep -q "libCapacitor.a"; then
+            echo "✅ Capacitor static library exists"
+            exit 0
           fi
           
-          [ -f "Pods/Headers/Public/Capacitor/module.modulemap" ] || {
-            echo "❌ Modulemap missing"
+          echo "ℹ️ Capacitor static library not found, attempting to build..."
+          
+          # Build using xcodebuild through workspace
+          xcodebuild -workspace App.xcworkspace \
+                    -scheme Capacitor \
+                    -configuration Release \
+                    -sdk iphoneos \
+                    BUILD_LIBRARY_FOR_DISTRIBUTION=YES \
+                    MACH_O_TYPE=staticlib \
+                    ONLY_ACTIVE_ARCH=NO \
+                    SKIP_INSTALL=NO \
+                    build | tee capacitor_build.log
+          
+          # Verify build succeeded
+          if ! find Pods -name "libCapacitor.a" | grep -q "libCapacitor.a"; then
+            echo "❌ Failed to build static library"
+            echo "=== BUILD ERRORS ==="
+            grep -i "error" capacitor_build.log || echo "No error messages found"
             exit 1
-          }
+          fi
           
           echo "✅ Static framework verification passed"
 
