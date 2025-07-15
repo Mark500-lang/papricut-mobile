@@ -54,20 +54,36 @@ workflows:
           nvm install 18
           nvm use 18
           
-          # Verify Node and npm
+          # Clean npm cache and verify installation
+          npm cache clean --force
           echo "Node version: $(node -v)"
           echo "npm version: $(npm -v)"
           
-          # Install Angular CLI globally and verify
+          # Install Angular CLI globally with exact version
           npm install -g npm@latest
-          npm install -g @angular/cli@17.3.17
-          echo "Angular CLI version: $(ng version | head -n 1)"
+          npm install -g @angular/cli@17.3.17 --force
+          
+          # Verify Angular CLI installation
+          NG_PATH=$(npm root -g)/@angular/cli/bin/ng
+          if [ -f "$NG_PATH" ]; then
+            echo "Angular CLI installed at: $NG_PATH"
+            ln -s "$NG_PATH" /usr/local/bin/ng || true
+            export PATH="$PATH:$(npm root -g)/@angular/cli/bin"
+          else
+            echo "❌ Angular CLI installation failed"
+            npm list -g --depth=0
+            exit 1
+          fi
           
           # Install other required global packages
           npm install -g @ionic/cli@7.2.1 native-run cordova-res
           
           # Install correct CocoaPods version
           gem install cocoapods -v 1.15.2 --conservative
+          
+          # Verify all installations
+          echo "Angular CLI version: $(ng version | head -n 1)"
+          echo "Ionic CLI version: $(ionic --version)"
 
       - name: Install Dependencies
         script: |
@@ -102,25 +118,15 @@ workflows:
         script: |
           echo "=== BUILDING PRODUCTION ASSETS ==="
           echo "Current PATH: $PATH"
-          echo "Angular CLI location: $(which ng)"
           
-          # Verify ng command is available
-          if ! command -v ng &> /dev/null; then
-            echo "❌ Angular CLI not found in PATH"
-            echo "Attempting to locate globally installed Angular CLI..."
-            NG_PATH=$(npm list -g @angular/cli | head -n 1 | awk '{print $1}')/bin/ng
-            if [ -f "$NG_PATH" ]; then
-              echo "Found Angular CLI at $NG_PATH"
-              export PATH="$PATH:$(dirname "$NG_PATH")"
-            else
-              echo "Could not find Angular CLI installation"
-              npm list -g --depth=0
-              exit 1
-            fi
+          # Try global ng first, then fall back to local npx
+          if command -v ng &> /dev/null; then
+            echo "Using global Angular CLI"
+            ng build --configuration production --output-path www --verbose 2>&1 | tee angular.log
+          else
+            echo "Using local Angular CLI via npx"
+            npx ng build --configuration production --output-path www --verbose 2>&1 | tee angular.log
           fi
-          
-          # Run build with production configuration
-          ng build --configuration production --output-path www --verbose 2>&1 | tee angular.log
           
           # Verify build output
           if [ ! -d "www" ]; then
