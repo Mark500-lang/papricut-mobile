@@ -504,9 +504,9 @@ workflows:
           
           echo "✅ Xcode workspace verified - using scheme at $SCHEME_PATH"
 
-      - name: Build IPA with Enhanced Diagnostics
+      - name: Build IPA with Isolated Signing
         script: |
-          echo "=== BUILDING IPA WITH ENHANCED DIAGNOSTICS ==="
+          echo "=== BUILDING IPA WITH ISOLATED SIGNING ==="
           export NSUnbufferedIO=YES
           
           # Clean previous builds
@@ -521,17 +521,23 @@ workflows:
             exit 1
           fi
           
-          # 2. Configure Pods to use automatic signing
-          echo "=== CONFIGURING PODS SIGNING ==="
+          # 2. Completely reset pod signing settings
+          echo "=== RESETTING PODS SIGNING ==="
           find ios/App/Pods -name project.pbxproj | while read pbxproj; do
-            /usr/libexec/PlistBuddy -c "Set :objects:*:buildSettings:PROVISIONING_PROFILE_SPECIFIER ''" "$pbxproj" 2>/dev/null || true
-            /usr/libexec/PlistBuddy -c "Set :objects:*:buildSettings:PROVISIONING_PROFILE ''" "$pbxproj" 2>/dev/null || true
-            /usr/libexec/PlistBuddy -c "Set :objects:*:buildSettings:CODE_SIGN_STYLE Automatic" "$pbxproj" 2>/dev/null || true
+            # Reset all signing-related settings
+            /usr/libexec/PlistBuddy -c "Delete :objects:*:buildSettings:PROVISIONING_PROFILE_SPECIFIER" "$pbxproj" 2>/dev/null || true
+            /usr/libexec/PlistBuddy -c "Delete :objects:*:buildSettings:PROVISIONING_PROFILE" "$pbxproj" 2>/dev/null || true
+            /usr/libexec/PlistBuddy -c "Delete :objects:*:buildSettings:CODE_SIGN_STYLE" "$pbxproj" 2>/dev/null || true
+            /usr/libexec/PlistBuddy -c "Delete :objects:*:buildSettings:DEVELOPMENT_TEAM" "$pbxproj" 2>/dev/null || true
+            /usr/libexec/PlistBuddy -c "Delete :objects:*:buildSettings:CODE_SIGN_IDENTITY" "$pbxproj" 2>/dev/null || true
+            
+            # Ensure automatic signing
+            /usr/libexec/PlistBuddy -c "Add :objects:*:buildSettings:CODE_SIGN_STYLE string Automatic" "$pbxproj" 2>/dev/null || true
           done
           
           # 3. Build with manual signing only for main app
           echo "=== STARTING XCODEBUILD ==="
-          xcodebuild -workspace "$XCODE_WORKSPACE" \
+          set -o pipefail && xcodebuild -workspace "$XCODE_WORKSPACE" \
                     -scheme "$XCODE_SCHEME" \
                     -sdk iphoneos \
                     -configuration Release \
@@ -554,15 +560,19 @@ workflows:
                     archive | tee "$HOME/build/xcodebuild.log"
           
           # Check exit status
-          XCODE_EXIT=${PIPESTATUS[0]}
-          if [ $XCODE_EXIT -ne 0 ]; then
-            echo "❌ Xcode build failed with exit code $XCODE_EXIT"
-            echo "=== ERROR SUMMARY ==="
-            grep -A10 -B5 "error:" "$HOME/build/xcodebuild.log" | grep -v "errors generated" | head -50
-            exit $XCODE_EXIT
+          if [ $? -ne 0 ]; then
+            echo "❌ Xcode build failed"
+            echo "=== BUILD ERROR SUMMARY ==="
+            grep -A10 -B5 "error:" "$HOME/build/xcodebuild.log" | grep -v "errors generated" | head -100
+            
+            # Additional diagnostics
+            echo "=== PODS SIGNING STATUS ==="
+            find ios/App/Pods -name project.pbxproj | xargs grep -l "PROVISIONING_PROFILE" || echo "No provisioning profiles found in pods"
+            
+            exit 1
           fi
           
-          echo "✅ Archive created successfully"
+          echo "✅ Archive created successfully at $HOME/build/App.xcarchive"
 
       - name: Real-time Archive Monitoring
         script: |
