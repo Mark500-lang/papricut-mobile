@@ -24,26 +24,26 @@ workflows:
         - node_modules
         - .angular/cache
     scripts:
-      - name: Complete Build Environment Cleanup
-        script: |
-          echo "=== COMPLETE BUILD ENVIRONMENT CLEANUP ==="
-          # Xcode caches
-          rm -rf ~/Library/Developer/Xcode/DerivedData/*
-          rm -rf ~/Library/Caches/com.apple.dt.Xcode
+      # - name: Complete Build Environment Cleanup
+      #   script: |
+      #     echo "=== COMPLETE BUILD ENVIRONMENT CLEANUP ==="
+      #     # Xcode caches
+      #     rm -rf ~/Library/Developer/Xcode/DerivedData/*
+      #     rm -rf ~/Library/Caches/com.apple.dt.Xcode
           
-          # Pods reset
-          rm -rf ios/App/Pods
-          rm -rf ios/App/Podfile.lock
+      #     # Pods reset
+      #     rm -rf ios/App/Pods
+      #     rm -rf ios/App/Podfile.lock
           
-          # Node cleanup
-          rm -rf node_modules
-          rm -rf .angular/cache
+      #     # Node cleanup
+      #     rm -rf node_modules
+      #     rm -rf .angular/cache
           
-          # Capacitor iOS platform reset
-          rm -rf ios/App/App/public
-          rm -rf ios/App/App.xcworkspace/xcuserdata
+      #     # Capacitor iOS platform reset
+      #     rm -rf ios/App/App/public
+      #     rm -rf ios/App/App.xcworkspace/xcuserdata
           
-          echo "✅ Environment cleaned"
+      #     echo "✅ Environment cleaned"
 
       - name: Install and Use Node 18
         script: |
