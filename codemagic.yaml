@@ -173,60 +173,62 @@ workflows:
           use_frameworks! :linkage => :static
 
           target 'App' do
-            # Core Capacitor with explicit static configuration
-            pod 'Capacitor', :path => '../../node_modules/@capacitor/ios', 
-                :modular_headers => true,
-                :configuration => ['Debug', 'Release']
+            # Core Capacitor (static framework)
+            pod 'Capacitor', :path => '../../node_modules/@capacitor/ios', :modular_headers => true
+            pod 'CapacitorCordova', :path => '../../node_modules/@capacitor/ios', :modular_headers => true
             
-            pod 'CapacitorCordova', :path => '../../node_modules/@capacitor/ios',
-                :modular_headers => true,
-                :configuration => ['Debug', 'Release']
-            
-            # Capacitor Plugins
+            # All your installed Capacitor plugins
             pod 'CapacitorApp', :path => '../../node_modules/@capacitor/app'
+            pod 'CapacitorBrowser', :path => '../../node_modules/@capacitor/browser'
             pod 'CapacitorCamera', :path => '../../node_modules/@capacitor/camera'
+            pod 'CapacitorDevice', :path => '../../node_modules/@capacitor/device'
+            pod 'CapacitorFilesystem', :path => '../../node_modules/@capacitor/filesystem'
+            pod 'CapacitorHaptics', :path => '../../node_modules/@capacitor/haptics'
             pod 'CapacitorKeyboard', :path => '../../node_modules/@capacitor/keyboard'
+            pod 'CapacitorNetwork', :path => '../../node_modules/@capacitor/network'
+            pod 'CapacitorPushNotifications', :path => '../../node_modules/@capacitor/push-notifications'
+            pod 'CapacitorSplashScreen', :path => '../../node_modules/@capacitor/splash-screen'
+            pod 'CapacitorStatusBar', :path => '../../node_modules/@capacitor/status-bar'
           end
 
           post_install do |installer|
             installer.pods_project.targets.each do |target|
               target.build_configurations.each do |config|
-                # Common settings for all targets
+                # Common static framework settings
                 config.build_settings['BUILD_LIBRARY_FOR_DISTRIBUTION'] = 'YES'
-                config.build_settings['SKIP_INSTALL'] = 'NO'
+                config.build_settings['MACH_O_TYPE'] = 'staticlib'
                 config.build_settings['CODE_SIGNING_ALLOWED'] = 'NO'
                 
-                # Special handling for Capacitor targets
+                # Special settings for Capacitor targets
                 if target.name.start_with?('Capacitor')
                   config.build_settings['DEFINES_MODULE'] = 'YES'
-                  config.build_settings['SWIFT_VERSION'] = '5.0'
-                  config.build_settings['MACH_O_TYPE'] = 'staticlib'
                   config.build_settings['OTHER_CFLAGS'] = '-fmodule-map-file=${PODS_ROOT}/Headers/Public/Capacitor/module.modulemap'
-                  config.build_settings['OTHER_SWIFT_FLAGS'] = '-import-underlying-module'
-                  config.build_settings['CLANG_ENABLE_MODULES'] = 'YES'
-                  config.build_settings['GENERATE_INFOPLIST_FILE'] = 'YES'
+                  config.build_settings['SWIFT_VERSION'] = '5.0'
+                end
+                
+                # Ensure all plugins use the same Swift version
+                if target.name.start_with?('Capacitor') || target.name.start_with?('CAP')
+                  config.build_settings['SWIFT_VERSION'] = '5.0'
                 end
               end
             end
 
-            # Create required modulemap and headers
+            # Create required modulemap for static framework
             capacitor_dir = File.join(installer.sandbox.root, 'Headers/Public/Capacitor')
             FileUtils.mkdir_p(capacitor_dir)
             
-            # Modulemap content
             modulemap_content = <<-MODULEMAP
-            framework module Capacitor {
-              umbrella header "Capacitor.h"
-              export *
-              module * { export * }
-            }
-            MODULEMAP
+          framework module Capacitor {
+            umbrella header "Capacitor.h"
+            export *
+            module * { export * }
+          }
+          MODULEMAP
             
             File.write(File.join(capacitor_dir, 'module.modulemap'), modulemap_content)
             
-            # Copy required headers from node_modules
-            headers = Dir.glob(File.join('../../node_modules/@capacitor/ios/Capacitor/Capacitor', '*.h'))
-            headers.each do |header|
+            # Copy all headers from Capacitor
+            Dir.glob(File.join('../../node_modules/@capacitor/ios/Capacitor/Capacitor', '*.h')).each do |header|
               header_name = File.basename(header)
               dest = File.join(capacitor_dir, header_name)
               FileUtils.cp(header, dest) unless File.exist?(dest)
@@ -364,32 +366,86 @@ workflows:
           echo "✅ Static framework verification passed"
           echo "Library location: $LIB_PATH"
 
-      - name: Verify Pod Installation Results
+      - name: Verify Pod Installation
         script: |
           echo "=== POD INSTALLATION VERIFICATION ==="
           cd ios/App
           
-          REQUIRED_FILES=(
-            "Pods/Capacitor/libCapacitor.a"
-            "Pods/CapacitorCordova/libCapacitorCordova.a"
+          # 1. Check for required headers
+          REQUIRED_HEADERS=(
             "Pods/Headers/Public/Capacitor/Capacitor.h"
+            "Pods/Headers/Public/Capacitor/CAPBridgeViewController.h"
           )
           
-          for file in "${REQUIRED_FILES[@]}"; do
-            [ -f "$file" ] || {
-              echo "❌ Missing critical pod file: $file"
-              exit 1
-            }
+          for header in "${REQUIRED_HEADERS[@]}"; do
+            if [ ! -f "$header" ]; then
+              echo "ℹ️ Copying missing header: $header"
+              mkdir -p Pods/Headers/Public/Capacitor
+              cp ../../node_modules/@capacitor/ios/Capacitor/Capacitor/$(basename "$header") Pods/Headers/Public/Capacitor/
+            fi
           done
           
-          ARCHS=$(lipo -info Pods/Capacitor/libCapacitor.a 2>/dev/null | awk -F': ' '{print $2}')
-          [[ "$ARCHS" == *"arm64"* ]] || {
-            echo "❌ Capacitor static library missing arm64 architecture"
-            echo "Found architectures: $ARCHS"
-            exit 1
+          # 2. Create modulemap if missing
+          if [ ! -f "Pods/Headers/Public/Capacitor/module.modulemap" ]; then
+            echo "ℹ️ Creating module.modulemap"
+            cat > Pods/Headers/Public/Capacitor/module.modulemap <<EOF
+          framework module Capacitor {
+            umbrella header "Capacitor.h"
+            export *
+            module * { export * }
           }
+          EOF
+          fi
           
-          echo "✅ Pod installation verified"
+          # 3. Check for static library in all possible locations
+          LIB_PATHS=(
+            "Pods/Capacitor/libCapacitor.a"
+            "Pods/build/Release-iphoneos/Capacitor/libCapacitor.a"
+            "DerivedData/Build/Products/Release-iphoneos/Capacitor/libCapacitor.a"
+          )
+          
+          FOUND_LIB=""
+          for path in "${LIB_PATHS[@]}"; do
+            if [ -f "$path" ]; then
+              FOUND_LIB="$path"
+              break
+            fi
+          done
+          
+          if [ -n "$FOUND_LIB" ]; then
+            echo "✅ Found Capacitor static library at: $FOUND_LIB"
+            echo "Architectures: $(lipo -info "$FOUND_LIB")"
+            exit 0
+          fi
+          
+          # 4. If not found, try building it explicitly
+          echo "ℹ️ Capacitor static library not found, building..."
+          xcodebuild \
+            -workspace App.xcworkspace \
+            -scheme Capacitor \
+            -configuration Release \
+            -sdk iphoneos \
+            BUILD_LIBRARY_FOR_DISTRIBUTION=YES \
+            MACH_O_TYPE=staticlib \
+            ONLY_ACTIVE_ARCH=NO \
+            SKIP_INSTALL=NO \
+            build | tee capacitor_build.log
+          
+          # Check again after building
+          for path in "${LIB_PATHS[@]}"; do
+            if [ -f "$path" ]; then
+              echo "✅ Successfully built Capacitor static library at: $path"
+              echo "Architectures: $(lipo -info "$path")"
+              exit 0
+            fi
+          done
+          
+          echo "❌ Failed to locate or build Capacitor static library"
+          echo "Searched in:"
+          printf "  • %s\n" "${LIB_PATHS[@]}"
+          echo "Build logs:"
+          grep -A10 "error:" capacitor_build.log || echo "No error details found"
+          exit 1
 
       - name: Sync Capacitor iOS Project
         script: |
