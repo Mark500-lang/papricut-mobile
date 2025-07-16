@@ -24,7 +24,7 @@ workflows:
           [ -d "ios/App/App/public" ] || { echo "❌ Web assets missing - run 'npx cap sync'"; exit 1; }
 
           # Verify Angular build
-          [ -f "www/main.js" ] || { echo "❌ Angular not built - run 'npm run build'"; exit 1; }
+          [ -f "www/main.17a28afb386e3ab3.js" ] || { echo "❌ Angular not built - run 'npm run build'"; exit 1; }
 
       # PHASE 2: DEPENDENCIES (VALIDATED)
       - name: Install Dependencies
