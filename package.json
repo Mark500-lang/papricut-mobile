@@ -10,7 +10,8 @@
     "lint": "ng lint",
     "start:android": "ionic capacitor run android --livereload --external",
     "start:ios": "ionic capacitor run ios --livereload --external",
-    "start:web": "ionic serve"
+    "start:web": "ionic serve",
+    "prepush": "npm run build && npx cap sync && [ -f ios/App/App/public/index.html ] || (echo 'Sync failed!' && exit 1)"
   },
   "dependencies": {
     "@angular/animations": "17.3.12",
