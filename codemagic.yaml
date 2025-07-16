@@ -284,30 +284,37 @@ workflows:
 
       - name: Install Pods with Xcode 16.4 Static Framework Support
         script: |
+          set -e  # Exit immediately if any command fails
           echo "=== INSTALLING PODS WITH STATIC FRAMEWORK FIX ==="
           cd ios/App
           
           # Clean pod cache
+          echo "--- Cleaning pod cache ---"
           pod cache clean --all
           
           # Install with verbose logging
+          echo "--- Running pod install ---"
           pod install --repo-update --verbose | tee pod_install.log
           
           # Verify static framework setup
+          echo "--- Verifying static framework setup ---"
           if [ ! -f "Pods/Headers/Public/Capacitor/module.modulemap" ]; then
-            echo "ℹ️ Creating missing module.modulemap"
+            echo "Creating missing module.modulemap"
             mkdir -p Pods/Headers/Public/Capacitor
-            cat <<EOF > Pods/Headers/Public/Capacitor/module.modulemap
+            cat << 'MODULEMAP_EOF' > Pods/Headers/Public/Capacitor/module.modulemap
             framework module Capacitor {
               umbrella header "Capacitor.h"
               export *
               module * { export * }
             }
-            EOF
+            MODULEMAP_EOF
+          else
+            echo "module.modulemap already exists"
           fi
           
           # Copy all required headers
-          cp ../../node_modules/@capacitor/ios/Capacitor/Capacitor/*.h Pods/Headers/Public/Capacitor/
+          echo "--- Copying Capacitor headers ---"
+          find ../../node_modules/@capacitor/ios/Capacitor/Capacitor -name "*.h" -exec cp {} Pods/Headers/Public/Capacitor/ \;
           
           echo "✅ Pods installed with static framework configuration"
 
