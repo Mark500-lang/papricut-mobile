@@ -1,20 +1,19 @@
 workflows:
-  ios-production:
-    name: iOS Production (Manual Signed)
+  ios-distribute:
+    name: iOS Distribute (Manual Signing)
+    integrations:
+      app_store_connect: Codemagic-key
     environment:
-      groups:
-        - papricut  # Contains all signing certs + env vars
       vars:
         XCODE_WORKSPACE: "ios/App/App.xcworkspace"
         XCODE_SCHEME: "App"
         NODE_VERSION: "18.x"  # Matches your package.json
         COCOAPODS_VERSION: "1.15.2"  # Confirmed working version
-    publishing:
-      app_store_connect:
-        auth: integration
-        api_key: Codemagic-key
-        submit_to_testflight: true
-
+      groups:
+        - Papricut
+    triggering:
+      events:
+        - push
     scripts:
       # PHASE 1: VALIDATE ENVIRONMENT
       - name: Verify Project Structure
@@ -134,3 +133,9 @@ workflows:
     artifacts:
       - ios/App/build/ipa/App.ipa
       - ios/App/xcodebuild.log
+
+    publishing:
+      app_store_connect:
+        auth: integration
+        api_key: Codemagic-key
+        submit_to_testflight: true
