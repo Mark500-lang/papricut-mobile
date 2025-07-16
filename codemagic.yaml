@@ -489,16 +489,32 @@ workflows:
           echo "=== UPDATING INFO.PLIST ==="
           PLIST_PATH="ios/App/App/Info.plist"
           
-          /usr/libexec/PlistBuddy -c "Add :NSAppTransportSecurity dict" "$PLIST_PATH" || true
+          # Ensure NSAppTransportSecurity dictionary exists
+          /usr/libexec/PlistBuddy -c "Add :NSAppTransportSecurity dict" "$PLIST_PATH" 2>/dev/null || true
           
+          # Ensure NSExceptionDomains dictionary exists
+          /usr/libexec/PlistBuddy -c "Add :NSAppTransportSecurity:NSExceptionDomains dict" "$PLIST_PATH" 2>/dev/null || true
+          
+          # Process each domain
           for domain in "api.papricut.com" "cdn.papricut.com"; do
-            /usr/libexec/PlistBuddy -c "Add :NSAppTransportSecurity:NSExceptionDomains dict" "$PLIST_PATH" || true
-            /usr/libexec/PlistBuddy -c "Add :NSAppTransportSecurity:NSExceptionDomains:${domain} dict" "$PLIST_PATH" || true
-            /usr/libexec/PlistBuddy -c "Set :NSAppTransportSecurity:NSExceptionDomains:${domain}:NSIncludesSubdomains true" "$PLIST_PATH"
-            /usr/libexec/PlistBuddy -c "Set :NSAppTransportSecurity:NSExceptionDomains:${domain}:NSExceptionAllowsInsecureHTTPLoads false" "$PLIST_PATH"
-            /usr/libexec/PlistBuddy -c "Set :NSAppTransportSecurity:NSExceptionDomains:${domain}:NSExceptionRequiresForwardSecrecy true" "$PLIST_PATH"
-            /usr/libexec/PlistBuddy -c "Set :NSAppTransportSecurity:NSExceptionDomains:${domain}:NSExceptionMinimumTLSVersion TLSv1.2" "$PLIST_PATH"
+            # Ensure domain dictionary exists
+            /usr/libexec/PlistBuddy -c "Add :NSAppTransportSecurity:NSExceptionDomains:${domain} dict" "$PLIST_PATH" 2>/dev/null || true
+            
+            # Set values only if they don't exist to avoid errors
+            /usr/libexec/PlistBuddy -c "Set :NSAppTransportSecurity:NSExceptionDomains:${domain}:NSIncludesSubdomains true" "$PLIST_PATH" 2>/dev/null || \
+              /usr/libexec/PlistBuddy -c "Add :NSAppTransportSecurity:NSExceptionDomains:${domain}:NSIncludesSubdomains bool true" "$PLIST_PATH"
+            
+            /usr/libexec/PlistBuddy -c "Set :NSAppTransportSecurity:NSExceptionDomains:${domain}:NSExceptionAllowsInsecureHTTPLoads false" "$PLIST_PATH" 2>/dev/null || \
+              /usr/libexec/PlistBuddy -c "Add :NSAppTransportSecurity:NSExceptionDomains:${domain}:NSExceptionAllowsInsecureHTTPLoads bool false" "$PLIST_PATH"
+            
+            /usr/libexec/PlistBuddy -c "Set :NSAppTransportSecurity:NSExceptionDomains:${domain}:NSExceptionRequiresForwardSecrecy true" "$PLIST_PATH" 2>/dev/null || \
+              /usr/libexec/PlistBuddy -c "Add :NSAppTransportSecurity:NSExceptionDomains:${domain}:NSExceptionRequiresForwardSecrecy bool true" "$PLIST_PATH"
+            
+            /usr/libexec/PlistBuddy -c "Set :NSAppTransportSecurity:NSExceptionDomains:${domain}:NSExceptionMinimumTLSVersion string TLSv1.2" "$PLIST_PATH" 2>/dev/null || \
+              /usr/libexec/PlistBuddy -c "Add :NSAppTransportSecurity:NSExceptionDomains:${domain}:NSExceptionMinimumTLSVersion string TLSv1.2" "$PLIST_PATH"
           done
+          
+          echo "✅ Info.plist updated successfully"
 
       - name: Setup Code Signing
         script: |
