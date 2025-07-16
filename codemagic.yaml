@@ -287,6 +287,13 @@ workflows:
           echo "=== INSTALLING PODS WITH STATIC FRAMEWORK FIX ==="
           cd ios/App
           
+          # Create a backup of the original Podfile
+          cp Podfile Podfile.backup
+          
+          # Ensure proper heredoc syntax in Podfile
+          sed -i '' 's/<<-MODULEMAP/<<-EOF/g' Podfile
+          sed -i '' 's/MODULEMAP/EOF/g' Podfile
+          
           # Clean pod cache
           pod cache clean --all
           
@@ -297,7 +304,7 @@ workflows:
           if [ ! -f "Pods/Headers/Public/Capacitor/module.modulemap" ]; then
             echo "ℹ️ Creating missing module.modulemap"
             mkdir -p Pods/Headers/Public/Capacitor
-            cat <<EOF > Pods/Headers/Public/Capacitor/module.modulemap
+            cat << 'EOF' > Pods/Headers/Public/Capacitor/module.modulemap
             framework module Capacitor {
               umbrella header "Capacitor.h"
               export *
@@ -307,7 +314,7 @@ workflows:
           fi
           
           # Copy all required headers
-          cp ../../node_modules/@capacitor/ios/Capacitor/Capacitor/*.h Pods/Headers/Public/Capacitor/
+          find ../../node_modules/@capacitor/ios/Capacitor/Capacitor -name "*.h" -exec cp {} Pods/Headers/Public/Capacitor/ \;
           
           echo "✅ Pods installed with static framework configuration"
 
