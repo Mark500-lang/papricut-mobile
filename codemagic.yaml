@@ -194,9 +194,8 @@ workflows:
           post_install do |installer|
             installer.pods_project.targets.each do |target|
               target.build_configurations.each do |config|
-                # Common static framework settings
+                # Common settings for all targets
                 config.build_settings['BUILD_LIBRARY_FOR_DISTRIBUTION'] = 'YES'
-                config.build_settings['MACH_O_TYPE'] = 'staticlib'
                 config.build_settings['CODE_SIGNING_ALLOWED'] = 'NO'
                 
                 # Special settings for Capacitor targets
@@ -204,11 +203,13 @@ workflows:
                   config.build_settings['DEFINES_MODULE'] = 'YES'
                   config.build_settings['OTHER_CFLAGS'] = '-fmodule-map-file=${PODS_ROOT}/Headers/Public/Capacitor/module.modulemap'
                   config.build_settings['SWIFT_VERSION'] = '5.0'
+                  config.build_settings['CLANG_ENABLE_MODULES'] = 'YES'
                 end
                 
-                # Ensure all plugins use the same Swift version
-                if target.name.start_with?('Capacitor') || target.name.start_with?('CAP')
-                  config.build_settings['SWIFT_VERSION'] = '5.0'
+                # Specific fix for CapacitorKeyboard
+                if target.name == 'CapacitorKeyboard'
+                  config.build_settings['GCC_WARN_INHIBIT_ALL_WARNINGS'] = 'YES'
+                  config.build_settings['SWIFT_SWIFT3_OBJC_INFERENCE'] = 'On'
                 end
               end
             end
@@ -593,33 +594,50 @@ workflows:
           rm -rf "$HOME/build"
           mkdir -p "$HOME/build"
           
+          # First build Capacitor explicitly
+          echo "ℹ️ Pre-building Capacitor..."
+          xcodebuild \
+            -workspace "$XCODE_WORKSPACE" \
+            -scheme Capacitor \
+            -configuration Release \
+            -sdk iphoneos \
+            -derivedDataPath DerivedData \
+            BUILD_LIBRARY_FOR_DISTRIBUTION=YES \
+            MACH_O_TYPE=staticlib \
+            ONLY_ACTIVE_ARCH=NO \
+            SKIP_INSTALL=NO \
+            CONFIGURATION_BUILD_DIR="${PWD}/StaticLibs" \
+            build | tee capacitor_build.log
+          
+          # Then build the main app
+          echo "ℹ️ Building main app..."
           set -o pipefail && xcodebuild \
-                    -workspace "$XCODE_WORKSPACE" \
-                    -scheme "$XCODE_SCHEME" \
-                    -sdk iphoneos \
-                    -configuration Release \
-                    -archivePath "$HOME/build/App.xcarchive" \
-                    -allowProvisioningUpdates \
-                    -destination 'generic/platform=iOS' \
-                    DEVELOPMENT_TEAM="$TEAM_ID" \
-                    PRODUCT_BUNDLE_IDENTIFIER="$BUNDLE_ID" \
-                    CODE_SIGN_STYLE="Manual" \
-                    CODE_SIGN_IDENTITY="iPhone Distribution" \
-                    PROVISIONING_PROFILE_SPECIFIER="$PROFILE_NAME" \
-                    PROVISIONING_PROFILE="$PROFILE_UUID" \
-                    OTHER_CODE_SIGN_FLAGS="--keychain build.keychain" \
-                    ENABLE_BITCODE=NO \
-                    BUILD_LIBRARY_FOR_DISTRIBUTION=YES \
-                    SKIP_INSTALL=NO \
-                    OTHER_LDFLAGS="-ObjC -all_load -lCapacitor -lCapacitorCordova" \
-                    LIBRARY_SEARCH_PATHS="\$(inherited) ${PODS_CONFIGURATION_BUILD_DIR}/Capacitor ${PODS_CONFIGURATION_BUILD_DIR}/CapacitorCordova ${PODS_ROOT}/../../node_modules/@capacitor/ios/Capacitor ${PWD}/StaticLibs ${PWD}/DerivedData/Build/Products/Release-iphoneos"
-                    FRAMEWORK_SEARCH_PATHS="\$(inherited) ${PODS_ROOT}/Capacitor ${PODS_ROOT}/CapacitorCordova" \
-                    LD_RUNPATH_SEARCH_PATHS="@executable_path/Frameworks" \
-                    ONLY_ACTIVE_ARCH=NO \
-                    GCC_PREPROCESSOR_DEFINITIONS="\$(inherited) CAPACITOR_ENABLE_STATIC_FRAMEWORK=1 CAPACITOR_USE_STATIC=1" \
-                    SWIFT_INCLUDE_PATHS="${PODS_ROOT}/Headers/Public/Capacitor" \
-                    CLANG_ENABLE_MODULES=YES \
-                    archive | tee "$HOME/build/xcodebuild.log"
+            -workspace "$XCODE_WORKSPACE" \
+            -scheme "$XCODE_SCHEME" \
+            -sdk iphoneos \
+            -configuration Release \
+            -archivePath "$HOME/build/App.xcarchive" \
+            -allowProvisioningUpdates \
+            -destination 'generic/platform=iOS' \
+            DEVELOPMENT_TEAM="$TEAM_ID" \
+            PRODUCT_BUNDLE_IDENTIFIER="$BUNDLE_ID" \
+            CODE_SIGN_STYLE="Manual" \
+            CODE_SIGN_IDENTITY="iPhone Distribution" \
+            PROVISIONING_PROFILE_SPECIFIER="$PROFILE_NAME" \
+            PROVISIONING_PROFILE="$PROFILE_UUID" \
+            OTHER_CODE_SIGN_FLAGS="--keychain build.keychain" \
+            ENABLE_BITCODE=NO \
+            BUILD_LIBRARY_FOR_DISTRIBUTION=YES \
+            SKIP_INSTALL=NO \
+            OTHER_LDFLAGS="-ObjC -all_load -lCapacitor -lCapacitorCordova" \
+            LIBRARY_SEARCH_PATHS="\$(inherited) ${PODS_CONFIGURATION_BUILD_DIR}/Capacitor ${PODS_CONFIGURATION_BUILD_DIR}/CapacitorCordova ${PODS_ROOT}/../../node_modules/@capacitor/ios/Capacitor ${PWD}/StaticLibs" \
+            FRAMEWORK_SEARCH_PATHS="\$(inherited) ${PODS_ROOT}/Capacitor ${PODS_ROOT}/CapacitorCordova" \
+            LD_RUNPATH_SEARCH_PATHS="@executable_path/Frameworks" \
+            ONLY_ACTIVE_ARCH=NO \
+            GCC_PREPROCESSOR_DEFINITIONS="\$(inherited) CAPACITOR_ENABLE_STATIC_FRAMEWORK=1 CAPACITOR_USE_STATIC=1" \
+            SWIFT_INCLUDE_PATHS="${PODS_ROOT}/Headers/Public/Capacitor" \
+            CLANG_ENABLE_MODULES=YES \
+            archive | tee "$HOME/build/xcodebuild.log"
           
           echo "✅ Build completed successfully"
 
@@ -627,20 +645,38 @@ workflows:
         script: |
           echo "=== VALIDATING BUNDLE ==="
           ARCHIVE_PATH="$HOME/build/App.xcarchive"
+          
+          # First check if archive exists
+          if [ ! -d "$ARCHIVE_PATH" ]; then
+            echo "❌ Archive not found at expected path: $ARCHIVE_PATH"
+            echo "Contents of build directory:"
+            ls -la "$HOME/build"
+            exit 1
+          fi
+          
           APP_PATH="$ARCHIVE_PATH/Products/Applications/App.app"
           
           [ -d "$APP_PATH" ] || {
             echo "❌ App bundle missing from archive"
+            echo "Archive contents:"
+            find "$ARCHIVE_PATH" -type d
             exit 1
           }
           
+          # Check binary size (static linking should produce larger binary)
           BINARY_SIZE=$(stat -f%z "$APP_PATH/App" 2>/dev/null || echo 0)
           if [ "$BINARY_SIZE" -lt 3000000 ]; then
             echo "❌ App binary too small ($BINARY_SIZE bytes) - static linking likely failed"
-            nm "$APP_PATH/App" 2>/dev/null | grep -i capacitor || echo "No Capacitor symbols found"
             exit 1
           fi
           
+          # Verify Capacitor symbols are present
+          if ! nm "$APP_PATH/App" 2>/dev/null | grep -q "Capacitor"; then
+            echo "❌ No Capacitor symbols found in binary - static linking failed"
+            exit 1
+          fi
+          
+          # Verify web assets
           REQUIRED_FILES=(
             "index.html"
             "main.*.js"
@@ -648,10 +684,12 @@ workflows:
           )
           
           for pattern in "${REQUIRED_FILES[@]}"; do
-            ls "$APP_PATH/public/$pattern" >/dev/null 2>&1 || {
+            if ! ls "$APP_PATH/public/$pattern" >/dev/null 2>&1; then
               echo "❌ Missing web file: $pattern"
+              echo "public directory contents:"
+              ls -la "$APP_PATH/public"
               exit 1
-            }
+            fi
           done
           
           echo "✅ Bundle validated successfully"
