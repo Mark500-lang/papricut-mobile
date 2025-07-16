@@ -333,7 +333,7 @@ workflows:
             cp ../../node_modules/@capacitor/ios/Capacitor/Capacitor/*.h Pods/Headers/Public/Capacitor/
           fi
 
-          # 2. Build Capacitor explicitly
+          # 2. Build Capacitor explicitly with proper settings
           echo "ℹ️ Building Capacitor static framework..."
           xcodebuild \
             -workspace App.xcworkspace \
@@ -346,29 +346,45 @@ workflows:
             ONLY_ACTIVE_ARCH=NO \
             SKIP_INSTALL=NO \
             CONFIGURATION_BUILD_DIR="${PWD}/StaticLibs" \
-            build | tee capacitor_build.log
+            OTHER_CFLAGS="-fmodule-map-file=${PWD}/Pods/Headers/Public/Capacitor/module.modulemap" \
+            HEADER_SEARCH_PATHS="${PWD}/Pods/Headers/Public" \
+            clean build | tee capacitor_build.log
 
-          # 3. Check for framework output (Xcode 16+ style)
-          FRAMEWORK_PATH="${PWD}/StaticLibs/Capacitor.framework"
-          if [ ! -d "$FRAMEWORK_PATH" ]; then
+          # 3. Check for framework output in multiple possible locations
+          FRAMEWORK_PATHS=(
+            "${PWD}/StaticLibs/Capacitor.framework"
+            "${PWD}/DerivedData/Build/Products/Release-iphoneos/Capacitor.framework"
+            "${PODS_CONFIGURATION_BUILD_DIR}/Capacitor.framework"
+          )
+
+          FOUND_FRAMEWORK=""
+          for path in "${FRAMEWORK_PATHS[@]}"; do
+            if [ -d "$path" ]; then
+              FOUND_FRAMEWORK="$path"
+              break
+            fi
+          done
+
+          if [ -z "$FOUND_FRAMEWORK" ]; then
             echo "❌ Failed to find built Capacitor.framework"
-            echo "Build directory contents:"
-            ls -la "${PWD}/StaticLibs"
+            echo "Build logs:"
+            grep -i "error" capacitor_build.log || echo "No error messages found"
             exit 1
           fi
 
           # 4. Verify the framework binary exists
-          BINARY_PATH="${FRAMEWORK_PATH}/Capacitor"
+          BINARY_PATH="${FOUND_FRAMEWORK}/Capacitor"
           if [ ! -f "$BINARY_PATH" ]; then
             echo "❌ Framework binary missing at: $BINARY_PATH"
+            echo "Framework contents:"
+            ls -la "$FOUND_FRAMEWORK"
             exit 1
           fi
 
-          # 5. Check architectures (with better error handling)
+          # 5. Check architectures
           ARCHS=$(lipo -info "$BINARY_PATH" 2>/dev/null)
           if [ $? -ne 0 ]; then
             echo "❌ Failed to get architecture info for framework binary"
-            echo "Lipo output: $ARCHS"
             exit 1
           fi
 
@@ -379,7 +395,7 @@ workflows:
           fi
 
           echo "✅ Static framework verification passed"
-          echo "Framework location: $FRAMEWORK_PATH"
+          echo "Framework location: $FOUND_FRAMEWORK"
           echo "Architectures: $ARCHS"
       - name: Verify Pod Installation
         script: |
