@@ -200,7 +200,8 @@ workflows:
             # Core Capacitor with explicit modulemap configuration
             pod 'Capacitor', :path => '../../node_modules/@capacitor/ios',
               :modular_headers => true,
-              :configuration => ['Debug', 'Release']
+              :configuration => ['Debug', 'Release'],
+              :header_mappings_dir => 'Capacitor/Capacitor'
             
             pod 'CapacitorCordova', :path => '../../node_modules/@capacitor/ios',
               :modular_headers => true,
@@ -221,69 +222,43 @@ workflows:
           end
 
           post_install do |installer|
-            # Create headers directory for static framework
+            # First ensure the headers directory exists
             capacitor_headers_dir = File.join(installer.sandbox.root, 'Headers/Public/Capacitor')
             FileUtils.mkdir_p(capacitor_headers_dir)
 
-            # Copy ALL headers from Capacitor
+            # Copy headers with proper relative paths
             Dir.glob(File.join('../../node_modules/@capacitor/ios/Capacitor/Capacitor', '*.h')).each do |header|
               FileUtils.cp(header, capacitor_headers_dir)
             end
 
-            # Create modulemap for static framework
-            modulemap_content = <<-MODULEMAP
+            # Create explicit modulemap
+            modulemap_path = File.join(capacitor_headers_dir, 'module.modulemap')
+            File.write(modulemap_path, <<-MODULEMAP)
               framework module Capacitor {
                 umbrella header "Capacitor.h"
                 export *
                 module * { export * }
               }
             MODULEMAP
-            File.write(File.join(capacitor_headers_dir, 'module.modulemap'), modulemap_content)
 
-            # Configure build settings for all targets
+            # Add these essential build settings to ALL targets
             installer.pods_project.targets.each do |target|
               target.build_configurations.each do |config|
-                # Static framework essentials
-                config.build_settings['MACH_O_TYPE'] = 'staticlib'
-                config.build_settings['BUILD_LIBRARY_FOR_DISTRIBUTION'] = 'YES'
-                config.build_settings['DEFINES_MODULE'] = 'YES'
-                config.build_settings['SKIP_INSTALL'] = 'NO'
-                
+                # Essential for static framework resolution
+                config.build_settings['HEADER_SEARCH_PATHS'] = [
+                  '$(inherited)',
+                  '"${PODS_ROOT}/Headers/Public"',
+                  '"${PODS_ROOT}/Headers/Public/Capacitor"'
+                ].join(' ')
+
                 # Xcode 16.4 specific fixes
                 config.build_settings['OTHER_CFLAGS'] = '$(inherited) -fmodule-map-file="${PODS_ROOT}/Headers/Public/Capacitor/module.modulemap"'
                 config.build_settings['OTHER_SWIFT_FLAGS'] = '$(inherited) -Xcc -fmodule-map-file=${PODS_ROOT}/Headers/Public/Capacitor/module.modulemap'
-                config.build_settings['SWIFT_INCLUDE_PATHS'] = '$(inherited) ${PODS_ROOT}/Headers/Public/Capacitor'
-                config.build_settings['HEADER_SEARCH_PATHS'] = '$(inherited) ${PODS_ROOT}/Headers/Public'
                 
-                # Static framework linking
-                config.build_settings['LIBRARY_SEARCH_PATHS'] = '$(inherited) ${PODS_CONFIGURATION_BUILD_DIR}/Capacitor'
+                # Static framework requirements
+                config.build_settings['DEFINES_MODULE'] = 'YES'
                 config.build_settings['CLANG_ENABLE_MODULES'] = 'YES'
-                config.build_settings['ALWAYS_SEARCH_USER_PATHS'] = 'NO'
-                
-                # Code signing disabled for pods
-                config.build_settings['CODE_SIGNING_ALLOWED'] = 'NO'
-                config.build_settings['CODE_SIGNING_REQUIRED'] = 'NO'
-                
-                # Add these settings for Xcode 16.4 compatibility
-                config.build_settings['SWIFT_COMPILATION_MODE'] = 'wholemodule'
-                config.build_settings['SWIFT_OPTIMIZATION_LEVEL'] = '-O'
-                config.build_settings['CLANG_ENABLE_MODULES'] = 'YES'
-
-                # Capacitor-specific optimizations
-                if target.name == 'Capacitor'
-                  config.build_settings['PRODUCT_NAME'] = 'Capacitor'
-                  config.build_settings['PRODUCT_MODULE_NAME'] = 'Capacitor'
-                  config.build_settings['EXCLUDED_ARCHS[sdk=iphonesimulator*]'] = 'arm64'
-                  config.build_settings['PUBLIC_HEADERS_FOLDER_PATH'] = 'Headers/Public/Capacitor'
-                end
               end
-            end
-
-            # Xcode 16.4 project-level settings
-            installer.pods_project.build_configurations.each do |config|
-              config.build_settings['EXCLUDED_ARCHS[sdk=iphonesimulator*]'] = 'arm64'
-              config.build_settings['ONLY_ACTIVE_ARCH'] = 'NO'
-              config.build_settings['VALID_ARCHS'] = 'arm64 armv7'
             end
           end
           EOF
@@ -334,16 +309,19 @@ workflows:
 
       - name: Pre-Build Capacitor Static Library
         script: |
+          # Replace your Pre-Build Capacitor Static Library script with:
           set -e
           echo "=== PRE-BUILDING CAPACITOR STATIC LIBRARY ==="
           cd ios/App
-          
-          # Clean and prepare build directory
-          rm -rf StaticLibs 2>/dev/null || true
-          mkdir -p StaticLibs
-          xattr -w com.apple.xcode.CreatedByBuildSystem true StaticLibs
-          
-          # Build with explicit header paths
+
+          # Clean previous builds
+          rm -rf StaticLibs Pods/Capacitor/libCapacitor.a
+
+          # Ensure headers are properly set up
+          mkdir -p Pods/Headers/Public/Capacitor
+          cp ../../node_modules/@capacitor/ios/Capacitor/Capacitor/*.h Pods/Headers/Public/Capacitor/
+
+          # Build with explicit paths
           xcodebuild \
             -workspace App.xcworkspace \
             -scheme Capacitor \
@@ -358,27 +336,16 @@ workflows:
             HEADER_SEARCH_PATHS="${PWD}/Pods/Headers/Public ${PWD}/StaticLibs" \
             OTHER_CFLAGS="-fmodule-map-file=${PWD}/Pods/Headers/Public/Capacitor/module.modulemap" \
             clean build | tee capacitor_build.log
-          
-          # Verify build output
+
+          # Verify and copy the built library
           if [ -f "StaticLibs/libCapacitor.a" ]; then
-            echo "✅ Successfully built static library"
-            echo "Library info: $(lipo -info StaticLibs/libCapacitor.a)"
-            
-            # Copy to expected location
             mkdir -p Pods/Capacitor
             cp StaticLibs/libCapacitor.a Pods/Capacitor/
+            echo "✅ Static library built successfully"
           else
             echo "❌ Failed to build static library"
-            echo "=== BUILD ERRORS ==="
-            grep -A10 "error:" capacitor_build.log || echo "No explicit errors found"
-            
-            # Fallback check
-            if [ -f "DerivedData/Build/Products/Release-iphoneos/libCapacitor.a" ]; then
-              echo "ℹ️ Found library in DerivedData"
-              cp DerivedData/Build/Products/Release-iphoneos/libCapacitor.a Pods/Capacitor/
-            else
-              exit 1
-            fi
+            grep -A10 "error:" capacitor_build.log || true
+            exit 1
           fi
 
       - name: Verify Static Framework Setup
