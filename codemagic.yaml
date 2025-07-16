@@ -19,7 +19,7 @@ workflows:
       - name: Verify Project Structure
         script: |
           # Critical file checks
-          [ -f "ios/App/exportOptions.plist" ] || { echo "❌ Missing exportOptions.plist"; exit 1; }
+          [ -f "exportOptions.plist" ] || { echo "❌ Missing exportOptions.plist"; exit 1; }
           [ -f "ios/App/App.xcodeproj/project.pbxproj" ] || { echo "❌ Xcode project missing"; exit 1; }
           [ -d "ios/App/App/public" ] || { echo "❌ Web assets missing - run 'npx cap sync'"; exit 1; }
 
