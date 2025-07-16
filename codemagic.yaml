@@ -13,7 +13,6 @@ workflows:
         NODE_OPTIONS: "--max-old-space-size=4096"
         NODE_VERSION: "18.x"
         NVM_DIR: "/Users/builder/.nvm"
-        CAPACITOR_STATIC_LIBS_DIR: "${CM_BUILD_DIR}/ios/App/StaticLibs"
       groups:
         - Papricut
     triggering:
@@ -24,62 +23,98 @@ workflows:
         - ~/.npm
         - node_modules
         - .angular/cache
-        - ios/App/Pods
     scripts:
       - name: Complete Build Environment Cleanup
         script: |
           echo "=== COMPLETE BUILD ENVIRONMENT CLEANUP ==="
           
-          # Xcode caches
+          # Xcode caches (more thorough)
           rm -rf ~/Library/Developer/Xcode/DerivedData/*
           rm -rf ~/Library/Caches/com.apple.dt.Xcode
           rm -rf ~/Library/Developer/Xcode/Archives/*
+          rm -rf ~/Library/Developer/Xcode/iOS\ DeviceSupport/*
           
-          # Pods reset
+          # Pods reset (more comprehensive)
+          rm -rf ios/App/Pods
           rm -rf ios/App/Podfile.lock
+          rm -rf ios/App/Podfile.lock.*
           rm -rf ios/App/.symlinks
           
-          # Node/npm cleanup
+          # Node/npm cleanup (more complete)
           rm -rf node_modules
           rm -rf package-lock.json
           rm -rf .angular/cache
+          rm -rf .npm
+          rm -rf ~/.npm
           
-          # Capacitor iOS platform reset
+          # Capacitor iOS platform reset (added more paths)
           rm -rf ios/App/App/public
-          rm -rf ios/App/App.xcworkspace/xcuserdata
+          rm -rf ios/App/App.xcworkspace
           rm -rf ios/App/App.xcodeproj/xcuserdata
+          rm -rf ios/App/App.xcodeproj/project.xcworkspace/xcuserdata
           
-          # Static libs cleanup
-          rm -rf "$CAPACITOR_STATIC_LIBS_DIR"
-          mkdir -p "$CAPACITOR_STATIC_LIBS_DIR"
+          # Additional iOS build artifacts
+          rm -rf ios/App/build
+          rm -rf ios/App/StaticLibs
+          
+          # Verify cleanup
+          echo "=== VERIFYING CLEANUP ==="
+          echo "Xcode caches:"
+          ls -la ~/Library/Developer/Xcode/DerivedData/ || echo "DerivedData removed"
+          echo "Pods directory:"
+          ls -la ios/App/Pods || echo "Pods removed"
+          echo "Node modules:"
+          ls -la node_modules || echo "node_modules removed"
+          
+          echo "✅ Environment thoroughly cleaned"
 
       - name: Install and Use Node 18
         script: |
           echo "=== INSTALLING NODE 18 ==="
+          
+          # 1. Install Node.js using Codemagic's preferred method (not nvm)
+          echo "Installing Node.js 18 directly..."
           curl -o node.pkg https://nodejs.org/dist/v18.20.2/node-v18.20.2.pkg
           sudo installer -pkg node.pkg -target /
           rm node.pkg
           
-          # Set up npm
+          # 2. Set up npm with correct permissions
+          echo "Configuring npm..."
           mkdir -p ~/.npm-global
           npm config set prefix '~/.npm-global'
           export PATH=~/.npm-global/bin:$PATH
           echo "export PATH=~/.npm-global/bin:\$PATH" >> ~/.zshrc
           echo "export PATH=~/.npm-global/bin:\$PATH" >> ~/.bashrc
           
-          # Install tools
+          # 3. Install specific npm version
           npm install -g npm@8.19.4
+          
+          # 4. Install Angular CLI with exact version
+          echo "Installing Angular CLI..."
           npm install -g @angular/cli@17.3.17 --force
+          
+          # 5. Verify Angular CLI installation
+          NG_PATH=~/.npm-global/bin/ng
+          if [ ! -f "$NG_PATH" ]; then
+            echo "❌ Angular CLI installation failed - binary not found"
+            echo "Global npm packages:"
+            npm list -g --depth=0
+            exit 1
+          fi
+          
+          # 6. Install other required tools
           npm install -g @ionic/cli@7.2.1 native-run cordova-res
           
-          # Install CocoaPods
+          # 7. Install CocoaPods
           gem install cocoapods -v 1.15.2 --conservative
           
-          # Verify
+          # 8. Verify installations
           echo "=== INSTALLATION VERIFICATION ==="
-          echo "Node: $(node -v)"
-          echo "npm: $(npm -v)"
-          echo "Angular CLI: $(ng version | head -n 1)"
+          echo "Node version: $(node -v)"
+          echo "npm version: $(npm -v)"
+          echo "Angular CLI version: $(~/.npm-global/bin/ng version | head -n 1)"
+          echo "Angular CLI path: $(which ng || echo 'Not in PATH')"
+          echo "Full PATH: $PATH"
 
       - name: Install Dependencies
         script: |
@@ -88,7 +123,8 @@ workflows:
           npm install --save-exact @angular-devkit/build-angular@17.3.17 @ionic/angular-toolkit@7.1.1
           
           if [ ! -d "node_modules/@angular-devkit/build-angular" ]; then
-            echo "❌ Angular build tools missing!"
+            echo "❌ CRITICAL: Angular build tools missing!"
+            npm list
             exit 1
           fi
 
@@ -112,39 +148,80 @@ workflows:
       - name: Build Angular App
         script: |
           echo "=== BUILDING PRODUCTION ASSETS ==="
-          export PATH=~/.npm-global/bin:$PATH
-          ng build --configuration production --output-path www --verbose 2>&1 | tee angular.log
           
+          # Ensure PATH is set correctly
+          export PATH=~/.npm-global/bin:$PATH
+          
+          # Verify ng command is available
+          if ! command -v ng &> /dev/null; then
+            echo "❌ Angular CLI not found in PATH"
+            echo "Current PATH: $PATH"
+            echo "Attempting direct path..."
+            ~/.npm-global/bin/ng build --configuration production --output-path www --verbose 2>&1 | tee angular.log
+          else
+            ng build --configuration production --output-path www --verbose 2>&1 | tee angular.log
+          fi
+          
+          # Verify build output
           if [ ! -d "www" ]; then
             echo "❌ Build failed - www directory not created"
+            echo "=== BUILD ERRORS ==="
             grep -i "error" angular.log || echo "No error messages found"
             exit 1
           fi
+          
+          # Verify critical files
+          REQUIRED_FILES=(
+            "www/index.html"
+            "www/main.*.js"
+            "www/runtime.*.js"
+          )
+          
+          for pattern in "${REQUIRED_FILES[@]}"; do
+            if ! ls $pattern >/dev/null 2>&1; then
+              echo "❌ Missing web file: $pattern"
+              echo "www directory contents:"
+              ls -la www/
+              exit 1
+            fi
+          done
+          
+          echo "✅ Angular build completed successfully"
 
-      - name: Configure Podfile with Static Setup
+      - name: Configure Podfile with Static Setup (Xcode 16.4 Fix)
         script: |
-          echo "=== CONFIGURING PODFILE ==="
+          echo "=== CONFIGURING PODFILE FOR XCODE 16.4 STATIC BUILD ==="
           cat << 'EOF' > ios/App/Podfile
           require_relative '../../node_modules/@capacitor/ios/scripts/pods_helpers'
           platform :ios, '13.0'
           use_frameworks! :linkage => :static
 
           target 'App' do
-            # Core Capacitor
-            pod 'Capacitor', :path => '../../node_modules/@capacitor/ios', :modular_headers => true
-            pod 'CapacitorCordova', :path => '../../node_modules/@capacitor/ios', :modular_headers => true
+            # Core Capacitor with explicit modulemap configuration
+            pod 'Capacitor', :path => '../../node_modules/@capacitor/ios',
+              :modular_headers => true,
+              :configuration => ['Debug', 'Release']
+            
+            pod 'CapacitorCordova', :path => '../../node_modules/@capacitor/ios',
+              :modular_headers => true,
+              :configuration => ['Debug', 'Release']
             
             # Capacitor plugins
             pod 'CapacitorApp', :path => '../../node_modules/@capacitor/app'
+            pod 'CapacitorBrowser', :path => '../../node_modules/@capacitor/browser'
             pod 'CapacitorCamera', :path => '../../node_modules/@capacitor/camera'
             pod 'CapacitorDevice', :path => '../../node_modules/@capacitor/device'
+            pod 'CapacitorFilesystem', :path => '../../node_modules/@capacitor/filesystem'
+            pod 'CapacitorHaptics', :path => '../../node_modules/@capacitor/haptics'
             pod 'CapacitorKeyboard', :path => '../../node_modules/@capacitor/keyboard'
+            pod 'CapacitorNetwork', :path => '../../node_modules/@capacitor/network'
+            pod 'CapacitorPushNotifications', :path => '../../node_modules/@capacitor/push-notifications'
             pod 'CapacitorSplashScreen', :path => '../../node_modules/@capacitor/splash-screen'
             pod 'CapacitorStatusBar', :path => '../../node_modules/@capacitor/status-bar'
           end
 
           post_install do |installer|
-            # Create headers directory
+            # Create headers directory for static framework
             capacitor_headers_dir = File.join(installer.sandbox.root, 'Headers/Public/Capacitor')
             FileUtils.mkdir_p(capacitor_headers_dir)
 
@@ -153,60 +230,96 @@ workflows:
               FileUtils.cp(header, capacitor_headers_dir)
             end
 
-            # Create modulemap
-            File.write(File.join(capacitor_headers_dir, 'module.modulemap'), <<-MODULEMAP)
+            # Create modulemap for static framework
+            modulemap_content = <<-MODULEMAP
               framework module Capacitor {
                 umbrella header "Capacitor.h"
                 export *
                 module * { export * }
               }
             MODULEMAP
+            File.write(File.join(capacitor_headers_dir, 'module.modulemap'), modulemap_content)
 
+            # Configure build settings for all targets
             installer.pods_project.targets.each do |target|
               target.build_configurations.each do |config|
-                # Essential static framework settings
+                # Static framework essentials
                 config.build_settings['MACH_O_TYPE'] = 'staticlib'
                 config.build_settings['BUILD_LIBRARY_FOR_DISTRIBUTION'] = 'YES'
+                config.build_settings['DEFINES_MODULE'] = 'YES'
                 config.build_settings['SKIP_INSTALL'] = 'NO'
-                config.build_settings['CODE_SIGNING_ALLOWED'] = 'NO'
                 
-                # Capacitor-specific settings
+                # Xcode 16.4 specific fixes
+                config.build_settings['OTHER_CFLAGS'] = '$(inherited) -fmodule-map-file="${PODS_ROOT}/Headers/Public/Capacitor/module.modulemap"'
+                config.build_settings['OTHER_SWIFT_FLAGS'] = '$(inherited) -Xcc -fmodule-map-file=${PODS_ROOT}/Headers/Public/Capacitor/module.modulemap'
+                config.build_settings['SWIFT_INCLUDE_PATHS'] = '$(inherited) ${PODS_ROOT}/Headers/Public/Capacitor'
+                config.build_settings['HEADER_SEARCH_PATHS'] = '$(inherited) ${PODS_ROOT}/Headers/Public'
+                
+                # Static framework linking
+                config.build_settings['LIBRARY_SEARCH_PATHS'] = '$(inherited) ${PODS_CONFIGURATION_BUILD_DIR}/Capacitor'
+                config.build_settings['CLANG_ENABLE_MODULES'] = 'YES'
+                config.build_settings['ALWAYS_SEARCH_USER_PATHS'] = 'NO'
+                
+                # Code signing disabled for pods
+                config.build_settings['CODE_SIGNING_ALLOWED'] = 'NO'
+                config.build_settings['CODE_SIGNING_REQUIRED'] = 'NO'
+                
+                # Capacitor-specific optimizations
                 if target.name == 'Capacitor'
-                  config.build_settings['DEFINES_MODULE'] = 'YES'
-                  config.build_settings['CLANG_ENABLE_MODULES'] = 'YES'
-                  config.build_settings['OTHER_CFLAGS'] = '-fmodule-map-file=${PODS_ROOT}/Headers/Public/Capacitor/module.modulemap'
-                  config.build_settings['HEADER_SEARCH_PATHS'] = '$(inherited) ${PODS_ROOT}/Headers/Public/Capacitor'
-                  config.build_settings['SWIFT_INCLUDE_PATHS'] = '$(inherited) ${PODS_ROOT}/Headers/Public/Capacitor'
+                  config.build_settings['PRODUCT_NAME'] = 'Capacitor'
+                  config.build_settings['PRODUCT_MODULE_NAME'] = 'Capacitor'
+                  config.build_settings['EXCLUDED_ARCHS[sdk=iphonesimulator*]'] = 'arm64'
                 end
               end
             end
 
-            # Xcode 16.4 compatibility
+            # Xcode 16.4 project-level settings
             installer.pods_project.build_configurations.each do |config|
-              config.build_settings.delete('VALID_ARCHS')
-              config.build_settings['ONLY_ACTIVE_ARCH'] = 'NO'
               config.build_settings['EXCLUDED_ARCHS[sdk=iphonesimulator*]'] = 'arm64'
+              config.build_settings['ONLY_ACTIVE_ARCH'] = 'NO'
+              config.build_settings['VALID_ARCHS'] = 'arm64 armv7'
             end
           end
           EOF
 
-      - name: Install Pods with Static Framework Support
+      - name: Install Pods with Xcode 16.4 Static Framework Support
         script: |
-          echo "=== INSTALLING PODS ==="
+          echo "=== INSTALLING PODS WITH STATIC FRAMEWORK FIX ==="
           cd ios/App
-          pod install --repo-update
           
-          # Verify Pods were installed
-          if [ ! -d "Pods" ]; then
-            echo "❌ Pods directory not created"
-            exit 1
+          # Clean pod cache
+          pod cache clean --all
+          
+          # Install with verbose logging
+          pod install --repo-update --verbose | tee pod_install.log
+          
+          # Verify static framework setup
+          if [ ! -f "Pods/Headers/Public/Capacitor/module.modulemap" ]; then
+            echo "ℹ️ Creating missing module.modulemap"
+            mkdir -p Pods/Headers/Public/Capacitor
+            cat <<EOF > Pods/Headers/Public/Capacitor/module.modulemap
+            framework module Capacitor {
+              umbrella header "Capacitor.h"
+              export *
+              module * { export * }
+            }
+            EOF
           fi
+          
+          # Copy all required headers
+          cp ../../node_modules/@capacitor/ios/Capacitor/Capacitor/*.h Pods/Headers/Public/Capacitor/
+          
+          echo "✅ Pods installed with static framework configuration"
 
-      - name: Build Capacitor Static Library
+      - name: Pre-Build Capacitor Static Library
         script: |
-          echo "=== BUILDING CAPACITOR STATIC LIBRARY ==="
+          echo "=== PRE-BUILDING CAPACITOR STATIC LIBRARY ==="
           cd ios/App
           
+          # Create build directory
+          mkdir -p StaticLibs
+          
+          # Build Capacitor as static library first
           xcodebuild \
             -workspace App.xcworkspace \
             -scheme Capacitor \
@@ -217,54 +330,291 @@ workflows:
             MACH_O_TYPE=staticlib \
             ONLY_ACTIVE_ARCH=NO \
             SKIP_INSTALL=NO \
-            CONFIGURATION_BUILD_DIR="$CAPACITOR_STATIC_LIBS_DIR" \
+            CONFIGURATION_BUILD_DIR="${PWD}/StaticLibs" \
+            OTHER_CFLAGS="-fmodule-map-file=${PWD}/Pods/Headers/Public/Capacitor/module.modulemap" \
+            HEADER_SEARCH_PATHS="${PWD}/Pods/Headers/Public ${PWD}/StaticLibs" \
             clean build | tee capacitor_build.log
           
-          # Verify static library was created
-          if [ ! -f "$CAPACITOR_STATIC_LIBS_DIR/libCapacitor.a" ]; then
-            echo "❌ Failed to build Capacitor static library"
+          # Verify static library was built
+          if [ -f "StaticLibs/libCapacitor.a" ]; then
+            echo "✅ Successfully built static library"
+            echo "Library info: $(lipo -info StaticLibs/libCapacitor.a)"
+            
+            # Ensure the library is in the expected location for main build
+            mkdir -p Pods/Capacitor
+            cp StaticLibs/libCapacitor.a Pods/Capacitor/
+          else
+            echo "❌ Failed to build static library"
+            echo "Build logs:"
+            grep -A10 "error:" capacitor_build.log || echo "No explicit errors found"
+            exit 1
+          fi
+
+      - name: Verify Static Framework Setup
+        script: |
+          echo "=== VERIFYING STATIC FRAMEWORK SETUP ==="
+          cd ios/App || { echo "❌ Failed to enter ios/App directory"; exit 1; }
+          
+          # 1. Ensure proper header setup
+          mkdir -p Pods/Headers/Public/Capacitor
+          if [ ! -f "Pods/Headers/Public/Capacitor/module.modulemap" ]; then
+            cat > Pods/Headers/Public/Capacitor/module.modulemap <<'EOM'
+          framework module Capacitor {
+            umbrella header "Capacitor.h"
+            export *
+            module * { export * }
+          }
+          EOM
+          fi
+
+          # Copy all required headers
+          cp ../../node_modules/@capacitor/ios/Capacitor/Capacitor/*.h Pods/Headers/Public/Capacitor/
+
+          # 2. Build Capacitor with correct settings
+          echo "ℹ️ Building Capacitor static framework..."
+          xcodebuild \
+            -workspace App.xcworkspace \
+            -scheme Capacitor \
+            -configuration Release \
+            -sdk iphoneos \
+            -derivedDataPath DerivedData \
+            BUILD_LIBRARY_FOR_DISTRIBUTION=YES \
+            MACH_O_TYPE=staticlib \
+            ONLY_ACTIVE_ARCH=NO \
+            SKIP_INSTALL=NO \
+            CONFIGURATION_BUILD_DIR="${PWD}/StaticLibs" \
+            OTHER_CFLAGS="-fmodule-map-file=${PWD}/Pods/Headers/Public/Capacitor/module.modulemap" \
+            HEADER_SEARCH_PATHS="${PWD}/Pods/Headers/Public ${PWD}/StaticLibs" \
+            clean build | tee capacitor_build.log
+
+          # 3. Verify framework binary exists
+          FRAMEWORK_PATH="${PWD}/StaticLibs/Capacitor.framework"
+          if [ ! -d "$FRAMEWORK_PATH" ]; then
+            echo "❌ Capacitor.framework not found in StaticLibs"
+            echo "Checking DerivedData..."
+            FRAMEWORK_PATH="${PWD}/DerivedData/Build/Products/Release-iphoneos/Capacitor.framework"
+          fi
+
+          if [ ! -d "$FRAMEWORK_PATH" ]; then
+            echo "❌ Failed to find built Capacitor.framework"
+            echo "Build logs:"
             grep -i "error" capacitor_build.log || echo "No error messages found"
             exit 1
           fi
+
+          # 4. Check for binary (either static lib or framework binary)
+          BINARY_PATH="${FRAMEWORK_PATH}/Capacitor"
+          if [ ! -f "$BINARY_PATH" ]; then
+            echo "ℹ️ Checking for static library instead..."
+            # Look for static lib in alternative locations
+            LIB_PATHS=(
+              "${PWD}/DerivedData/Build/Products/Release-iphoneos/libCapacitor.a"
+              "${PODS_CONFIGURATION_BUILD_DIR}/Capacitor/libCapacitor.a"
+            )
+            
+            for path in "${LIB_PATHS[@]}"; do
+              if [ -f "$path" ]; then
+                echo "✅ Found static library at: $path"
+                echo "Architectures: $(lipo -info "$path")"
+                exit 0
+              fi
+            done
+            
+            echo "❌ No Capacitor binary found (neither framework nor static lib)"
+            echo "Framework contents:"
+            ls -la "$FRAMEWORK_PATH"
+            exit 1
+          fi
+
+          # 5. Verify architectures
+          ARCHS=$(lipo -info "$BINARY_PATH" 2>/dev/null)
+          if [ $? -ne 0 ]; then
+            echo "❌ Failed to get architecture info for binary"
+            exit 1
+          fi
+
+          if [[ ! "$ARCHS" =~ "arm64" ]]; then
+            echo "❌ Missing required arm64 architecture"
+            echo "Architecture info: $ARCHS"
+            exit 1
+          fi
+
+          echo "✅ Static framework verification passed"
+          echo "Binary location: $BINARY_PATH"
+          echo "Architectures: $ARCHS"
+      - name: Verify Pod Installation
+        script: |
+          echo "=== POD INSTALLATION VERIFICATION ==="
+          cd ios/App
           
-          echo "✅ Capacitor static library built successfully"
+          # 1. Check for required headers
+          REQUIRED_HEADERS=(
+            "Pods/Headers/Public/Capacitor/Capacitor.h"
+            "Pods/Headers/Public/Capacitor/CAPBridgeViewController.h"
+          )
+          
+          for header in "${REQUIRED_HEADERS[@]}"; do
+            if [ ! -f "$header" ]; then
+              echo "ℹ️ Copying missing header: $header"
+              mkdir -p Pods/Headers/Public/Capacitor
+              cp ../../node_modules/@capacitor/ios/Capacitor/Capacitor/$(basename "$header") Pods/Headers/Public/Capacitor/
+            fi
+          done
+          
+          # 2. Create modulemap if missing
+          if [ ! -f "Pods/Headers/Public/Capacitor/module.modulemap" ]; then
+            echo "ℹ️ Creating module.modulemap"
+            cat > Pods/Headers/Public/Capacitor/module.modulemap <<EOF
+          framework module Capacitor {
+            umbrella header "Capacitor.h"
+            export *
+            module * { export * }
+          }
+          EOF
+          fi
+          
+          # 3. Updated search paths for Xcode 16.4
+          LIB_PATHS=(
+            "Pods/Capacitor/libCapacitor.a"
+            "Pods/build/Release-iphoneos/Capacitor/libCapacitor.a"
+            "DerivedData/Build/Products/Release-iphoneos/Capacitor/libCapacitor.a"
+            "Pods/Target Support Files/Capacitor/libCapacitor.a"
+            "build/Pods/Release-iphoneos/Capacitor/libCapacitor.a"
+            "${PODS_CONFIGURATION_BUILD_DIR}/Capacitor/libCapacitor.a"
+          )
+          
+          FOUND_LIB=""
+          for path in "${LIB_PATHS[@]}"; do
+            if [ -f "$path" ]; then
+              FOUND_LIB="$path"
+              echo "ℹ️ Found library candidate at: $path"
+              break
+            fi
+          done
+          
+          if [ -n "$FOUND_LIB" ]; then
+            echo "✅ Found Capacitor static library at: $FOUND_LIB"
+            echo "Architectures: $(lipo -info "$FOUND_LIB")"
+            exit 0
+          fi
+          
+          # 4. If not found, try building it explicitly with Xcode 16.4 parameters
+          echo "ℹ️ Capacitor static library not found, building explicitly..."
+          xcodebuild \
+            -workspace App.xcworkspace \
+            -scheme Capacitor \
+            -configuration Release \
+            -sdk iphoneos \
+            -derivedDataPath DerivedData \
+            BUILD_LIBRARY_FOR_DISTRIBUTION=YES \
+            MACH_O_TYPE=staticlib \
+            ONLY_ACTIVE_ARCH=NO \
+            SKIP_INSTALL=NO \
+            CONFIGURATION_BUILD_DIR="${PWD}/StaticLibs" \
+            build | tee capacitor_build.log
+          
+          # Check in new possible locations
+          LIB_PATHS+=(
+            "DerivedData/Build/Products/Release-iphoneos/Capacitor/libCapacitor.a"
+            "StaticLibs/Capacitor.framework/Capacitor"
+          )
+          
+          for path in "${LIB_PATHS[@]}"; do
+            if [ -f "$path" ]; then
+              echo "✅ Successfully built Capacitor static library at: $path"
+              echo "Architectures: $(lipo -info "$path")"
+              
+              # Ensure the library is in expected location for main build
+              mkdir -p Pods/Capacitor
+              cp "$path" Pods/Capacitor/libCapacitor.a
+              exit 0
+            fi
+          done
+          
+          echo "❌ Failed to locate or build Capacitor static library"
+          echo "Searched in:"
+          printf "  • %s\n" "${LIB_PATHS[@]}"
+          echo "Build logs:"
+          grep -A10 "error:" capacitor_build.log || echo "No error details found"
+          exit 1
 
       - name: Sync Capacitor iOS Project
         script: |
           echo "=== SYNCING CAPACITOR IOS ==="
+          rm -rf ios/App/App/public
           npx cap sync ios
           
-          if [ ! -d "ios/App/App/public" ]; then
-            echo "ℹ️ Copying www content manually"
-            mkdir -p ios/App/App/public
-            cp -R www/* ios/App/App/public/
-          fi
+          REQUIRED_FILES=(
+            "ios/App/App/public/index.html"
+            "ios/App/App/App.entitlements"
+          )
+          
+          for file in "${REQUIRED_FILES[@]}"; do
+            if [ ! -f "$file" ]; then
+              echo "❌ Missing critical file: $file"
+              mkdir -p ios/App/App/public
+              cp -R www/* ios/App/App/public/
+              [ -f "$file" ] || {
+                echo "❌ Still missing after manual copy"
+                exit 1
+              }
+            fi
+          done
+          
+          [ -d "ios/App/App.xcworkspace" ] || {
+            echo "❌ Xcode workspace missing"
+            exit 1
+          }
+          
+          echo "✅ iOS sync completed successfully"
 
       - name: Update Info.plist
         script: |
           echo "=== UPDATING INFO.PLIST ==="
           PLIST_PATH="ios/App/App/Info.plist"
           
+          # Ensure NSAppTransportSecurity dictionary exists
           /usr/libexec/PlistBuddy -c "Add :NSAppTransportSecurity dict" "$PLIST_PATH" 2>/dev/null || true
+          
+          # Ensure NSExceptionDomains dictionary exists
           /usr/libexec/PlistBuddy -c "Add :NSAppTransportSecurity:NSExceptionDomains dict" "$PLIST_PATH" 2>/dev/null || true
           
+          # Process each domain
           for domain in "api.papricut.com" "cdn.papricut.com"; do
+            # Ensure domain dictionary exists
             /usr/libexec/PlistBuddy -c "Add :NSAppTransportSecurity:NSExceptionDomains:${domain} dict" "$PLIST_PATH" 2>/dev/null || true
-            /usr/libexec/PlistBuddy -c "Set :NSAppTransportSecurity:NSExceptionDomains:${domain}:NSIncludesSubdomains true" "$PLIST_PATH" 2>/dev/null || true
-            /usr/libexec/PlistBuddy -c "Set :NSAppTransportSecurity:NSExceptionDomains:${domain}:NSExceptionMinimumTLSVersion string TLSv1.2" "$PLIST_PATH" 2>/dev/null || true
+            
+            # Set values only if they don't exist to avoid errors
+            /usr/libexec/PlistBuddy -c "Set :NSAppTransportSecurity:NSExceptionDomains:${domain}:NSIncludesSubdomains true" "$PLIST_PATH" 2>/dev/null || \
+              /usr/libexec/PlistBuddy -c "Add :NSAppTransportSecurity:NSExceptionDomains:${domain}:NSIncludesSubdomains bool true" "$PLIST_PATH"
+            
+            /usr/libexec/PlistBuddy -c "Set :NSAppTransportSecurity:NSExceptionDomains:${domain}:NSExceptionAllowsInsecureHTTPLoads false" "$PLIST_PATH" 2>/dev/null || \
+              /usr/libexec/PlistBuddy -c "Add :NSAppTransportSecurity:NSExceptionDomains:${domain}:NSExceptionAllowsInsecureHTTPLoads bool false" "$PLIST_PATH"
+            
+            /usr/libexec/PlistBuddy -c "Set :NSAppTransportSecurity:NSExceptionDomains:${domain}:NSExceptionRequiresForwardSecrecy true" "$PLIST_PATH" 2>/dev/null || \
+              /usr/libexec/PlistBuddy -c "Add :NSAppTransportSecurity:NSExceptionDomains:${domain}:NSExceptionRequiresForwardSecrecy bool true" "$PLIST_PATH"
+            
+            /usr/libexec/PlistBuddy -c "Set :NSAppTransportSecurity:NSExceptionDomains:${domain}:NSExceptionMinimumTLSVersion string TLSv1.2" "$PLIST_PATH" 2>/dev/null || \
+              /usr/libexec/PlistBuddy -c "Add :NSAppTransportSecurity:NSExceptionDomains:${domain}:NSExceptionMinimumTLSVersion string TLSv1.2" "$PLIST_PATH"
           done
+          
+          echo "✅ Info.plist updated successfully"
 
       - name: Setup Code Signing
         script: |
           echo "=== SETTING UP CODE SIGNING ==="
+          
+          # Decode signing assets
           echo "$DISTRIBUTION_CERTIFICATE" | base64 --decode > signing.p12
           echo "$PROVISIONING_PROFILE" | base64 --decode > "$PROFILE_NAME.mobileprovision"
           
+          # Install provisioning profile
           PROFILE_UUID=$(/usr/libexec/PlistBuddy -c 'Print UUID' /dev/stdin <<< $(security cms -D -i "$PROFILE_NAME.mobileprovision"))
           mkdir -p ~/Library/MobileDevice/Provisioning\ Profiles
           cp "$PROFILE_NAME.mobileprovision" ~/Library/MobileDevice/Provisioning\ Profiles/"$PROFILE_UUID".mobileprovision
           echo "export PROFILE_UUID=$PROFILE_UUID" >> $CM_ENV
           
+          # Setup keychain
           security create-keychain -p "" build.keychain
           security import signing.p12 -k build.keychain -P "$CERTIFICATE_PASSWORD" -T /usr/bin/codesign
           security list-keychains -s build.keychain
@@ -272,12 +622,16 @@ workflows:
           security unlock-keychain -p "" build.keychain
           security set-key-partition-list -S apple-tool:,apple: -k "" build.keychain
 
-      - name: Configure Pods Signing
+      - name: Configure Pods Signing (Static Framework Fix)
         script: |
-          echo "=== CONFIGURING PODS SIGNING ==="
+          echo "=== CONFIGURING PODS FOR STATIC FRAMEWORKS ==="
           find ios/App/Pods -name project.pbxproj | while read pbxproj; do
             sed -i '' 's/CODE_SIGNING_ALLOWED = .*/CODE_SIGNING_ALLOWED = NO;/g' "$pbxproj"
             sed -i '' 's/CODE_SIGNING_REQUIRED = .*/CODE_SIGNING_REQUIRED = NO;/g' "$pbxproj"
+            sed -i '' 's/PROVISIONING_PROFILE_SPECIFIER = .*/PROVISIONING_PROFILE_SPECIFIER = "";/g' "$pbxproj"
+            sed -i '' 's/PROVISIONING_PROFILE = .*/PROVISIONING_PROFILE = "";/g' "$pbxproj"
+            sed -i '' 's/DEVELOPMENT_TEAM = .*/DEVELOPMENT_TEAM = "";/g' "$pbxproj"
+            sed -i '' 's/CODE_SIGN_STYLE = .*/CODE_SIGN_STYLE = Automatic;/g' "$pbxproj"
           done
 
       - name: Increment Build Number
@@ -287,13 +641,97 @@ workflows:
           NEW_BUILD=$((CURRENT_BUILD + 1))
           /usr/libexec/PlistBuddy -c "Set CFBundleVersion $NEW_BUILD" "$PLIST_PATH"
           echo "Updated build number from $CURRENT_BUILD to $NEW_BUILD"
-
-      - name: Build IPA
+      - name: Verify Build Environment
         script: |
-          echo "=== BUILDING IPA ==="
+          echo "=== BUILD ENVIRONMENT VERIFICATION ==="
+          cd ios/App
+          
+          # Verify Xcode version
+          XCODE_VERSION=$(xcodebuild -version | head -n 1)
+          echo "Using $XCODE_VERSION"
+          
+          # Verify CocoaPods version
+          POD_VERSION=$(pod --version)
+          echo "Using CocoaPods $POD_VERSION"
+          
+          # Verify static framework configuration
+          if ! grep -q "use_frameworks! :linkage => :static" Podfile; then
+            echo "❌ Static framework configuration missing from Podfile"
+            exit 1
+          fi
+          
+          # Verify modulemap exists
+          if [ ! -f "Pods/Headers/Public/Capacitor/module.modulemap" ]; then
+            echo "❌ Capacitor module.modulemap missing"
+            exit 1
+          fi
+          
+          echo "✅ Build environment verified"
+      - name: Verify Capacitor Headers
+        script: |
+          echo "=== VERIFYING CAPACITOR HEADERS ==="
+          cd ios/App
+          
+          # Create headers directory if it doesn't exist
+          mkdir -p Pods/Headers/Public/Capacitor
+          
+          # List all available headers in node_modules
+          echo "Available headers in node_modules:"
+          ls -la ../../node_modules/@capacitor/ios/Capacitor/Capacitor/*.h || true
+          
+          # Copy ALL headers from Capacitor package
+          echo "Copying headers from node_modules..."
+          find ../../node_modules/@capacitor/ios/Capacitor/Capacitor -name "*.h" -exec cp {} Pods/Headers/Public/Capacitor/ \;
+          
+          # Verify specific headers
+          REQUIRED_HEADERS=(
+            "Capacitor.h"
+            "CAPBridgeViewController.h"
+            "CAPBridgedPlugin.h"
+          )
+          
+          ALL_HEADERS_PRESENT=true
+          for header in "${REQUIRED_HEADERS[@]}"; do
+            if [ ! -f "Pods/Headers/Public/Capacitor/$header" ]; then
+              echo "❌ Missing required header: $header"
+              ALL_HEADERS_PRESENT=false
+            fi
+          done
+          
+          if [ "$ALL_HEADERS_PRESENT" = false ]; then
+            echo "=== DEBUGGING INFO ==="
+            echo "Contents of Pods/Headers/Public/Capacitor:"
+            ls -la Pods/Headers/Public/Capacitor/
+            echo "Contents of node_modules/@capacitor/ios/Capacitor/Capacitor:"
+            ls -la ../../node_modules/@capacitor/ios/Capacitor/Capacitor/
+            exit 1
+          fi
+          
+          # Create modulemap
+          echo "Creating module.modulemap..."
+          cat > Pods/Headers/Public/Capacitor/module.modulemap <<EOF
+          framework module Capacitor {
+            umbrella header "Capacitor.h"
+            export *
+            module * { export * }
+          }
+          EOF
+          
+          echo "✅ All required headers present"
+      - name: Build IPA with Static Framework Support (Xcode 16.4 Fix)
+        script: |
+          echo "=== BUILDING IPA WITH STATIC FRAMEWORK FIX ==="
           export NSUnbufferedIO=YES
           
-          xcodebuild \
+          # Clean derived data
+          rm -rf ~/Library/Developer/Xcode/DerivedData/*
+          
+          # Set up build directory
+          rm -rf "$HOME/build"
+          mkdir -p "$HOME/build"
+          
+          # Build with static framework parameters
+          set -o pipefail && xcodebuild \
             -workspace "$XCODE_WORKSPACE" \
             -scheme "$XCODE_SCHEME" \
             -sdk iphoneos \
@@ -310,23 +748,93 @@ workflows:
             OTHER_CODE_SIGN_FLAGS="--keychain build.keychain" \
             ENABLE_BITCODE=NO \
             BUILD_LIBRARY_FOR_DISTRIBUTION=YES \
+            MACH_O_TYPE=staticlib \
             SKIP_INSTALL=NO \
-            OTHER_LDFLAGS="-ObjC -all_load -lCapacitor -lCapacitorCordova" \
-            LIBRARY_SEARCH_PATHS="\$(inherited) $CAPACITOR_STATIC_LIBS_DIR ${PODS_CONFIGURATION_BUILD_DIR}/Capacitor ${PODS_CONFIGURATION_BUILD_DIR}/CapacitorCordova" \
-            FRAMEWORK_SEARCH_PATHS="\$(inherited) $CAPACITOR_STATIC_LIBS_DIR ${PODS_ROOT}/Capacitor ${PODS_ROOT}/CapacitorCordova" \
+            OTHER_LDFLAGS="$(inherited) -ObjC -all_load -lCapacitor -lCapacitorCordova" \
+            LIBRARY_SEARCH_PATHS="$(inherited) ${PWD}/StaticLibs ${PODS_CONFIGURATION_BUILD_DIR}/Capacitor ${PODS_CONFIGURATION_BUILD_DIR}/CapacitorCordova" \
+            FRAMEWORK_SEARCH_PATHS="$(inherited) ${PODS_ROOT}/Capacitor ${PODS_ROOT}/CapacitorCordova" \
             LD_RUNPATH_SEARCH_PATHS="@executable_path/Frameworks" \
             ONLY_ACTIVE_ARCH=NO \
-            GCC_PREPROCESSOR_DEFINITIONS="\$(inherited) CAPACITOR_ENABLE_STATIC_FRAMEWORK=1 CAPACITOR_USE_STATIC=1" \
+            GCC_PREPROCESSOR_DEFINITIONS="$(inherited) CAPACITOR_ENABLE_STATIC_FRAMEWORK=1 CAPACITOR_USE_STATIC=1" \
             SWIFT_INCLUDE_PATHS="${PODS_ROOT}/Headers/Public/Capacitor" \
             CLANG_ENABLE_MODULES=YES \
-            HEADER_SEARCH_PATHS="\$(inherited) ${PODS_ROOT}/Headers/Public/Capacitor" \
+            HEADER_SEARCH_PATHS="$(inherited) ${PODS_ROOT}/Headers/Public/Capacitor" \
             archive | tee "$HOME/build/xcodebuild.log"
           
+          # Verify archive
           if [ ! -d "$HOME/build/App.xcarchive" ]; then
             echo "❌ Archive creation failed"
-            grep -A10 "error:" "$HOME/build/xcodebuild.log" || echo "No error details found"
+            grep -A10 "error:" "$HOME/build/xcodebuild.log" || echo "No explicit errors found"
             exit 1
           fi
+          echo "✅ Build completed successfully"
+
+      - name: Validate Bundle (Robust Static Linking Check)
+        script: |
+          echo "=== VALIDATING BUNDLE ==="
+          ARCHIVE_PATH="$HOME/build/App.xcarchive"
+          
+          # First check if archive exists
+          if [ ! -d "$ARCHIVE_PATH" ]; then
+            echo "❌ Archive not found at expected path: $ARCHIVE_PATH"
+            echo "Possible causes:"
+            echo "1. Archive step failed (check previous step logs)"
+            echo "2. Incorrect archive path specified"
+            echo "3. Build directory was cleaned prematurely"
+            
+            echo "Contents of build directory:"
+            ls -la "$HOME/build"
+            
+            # Check for partial archive
+            PARTIAL_ARCHIVE=$(find "$HOME/build" -name "*.xcarchive" | head -n 1)
+            if [ -n "$PARTIAL_ARCHIVE" ]; then
+              echo "ℹ️ Found partial archive at: $PARTIAL_ARCHIVE"
+              echo "Partial archive contents:"
+              find "$PARTIAL_ARCHIVE" -type d
+            fi
+            
+            exit 1
+          fi
+          
+          APP_PATH="$ARCHIVE_PATH/Products/Applications/App.app"
+          
+          [ -d "$APP_PATH" ] || {
+            echo "❌ App bundle missing from archive"
+            echo "Archive contents:"
+            find "$ARCHIVE_PATH" -type d
+            exit 1
+          }
+          
+          # Check binary size (static linking should produce larger binary)
+          BINARY_SIZE=$(stat -f%z "$APP_PATH/App" 2>/dev/null || echo 0)
+          if [ "$BINARY_SIZE" -lt 3000000 ]; then
+            echo "❌ App binary too small ($BINARY_SIZE bytes) - static linking likely failed"
+            exit 1
+          fi
+          
+          # Verify Capacitor symbols are present
+          if ! nm "$APP_PATH/App" 2>/dev/null | grep -q "Capacitor"; then
+            echo "❌ No Capacitor symbols found in binary - static linking failed"
+            exit 1
+          fi
+          
+          # Verify web assets
+          REQUIRED_FILES=(
+            "index.html"
+            "main.*.js"
+            "runtime.*.js"
+          )
+          
+          for pattern in "${REQUIRED_FILES[@]}"; do
+            if ! ls "$APP_PATH/public/$pattern" >/dev/null 2>&1; then
+              echo "❌ Missing web file: $pattern"
+              echo "public directory contents:"
+              ls -la "$APP_PATH/public"
+              exit 1
+            fi
+          done
+          
+          echo "✅ Bundle validated successfully"
 
       - name: Export IPA
         script: |
@@ -337,32 +845,25 @@ workflows:
                     -exportOptionsPlist ExportOptions.plist \
                     -allowProvisioningUpdates | tee "$HOME/build/export_log.txt"
           
-          if [ ! -f "$HOME/build/ipa/App.ipa" ]; then
+          [ -f "$HOME/build/ipa/App.ipa" ] || {
             echo "❌ IPA export failed"
             grep "error:" "$HOME/build/export_log.txt" || echo "No explicit errors found"
             exit 1
-          fi
+          }
+          echo "✅ IPA created successfully"
 
       - name: Final Verification
         script: |
           echo "=== FINAL BUILD VALIDATION ==="
           APP_PATH="$HOME/build/App.xcarchive/Products/Applications/App.app"
-          
-          # Verify Capacitor is statically linked
-          if ! nm "$APP_PATH/App" 2>/dev/null | grep -q "Capacitor"; then
-            echo "❌ Capacitor symbols not found - static linking failed"
-            exit 1
-          fi
-          
-          # Verify binary size
-          BINARY_SIZE=$(stat -f%z "$APP_PATH/App")
-          echo "Binary size: $BINARY_SIZE bytes"
-          
+          echo "App Version: $(/usr/libexec/PlistBuddy -c "Print CFBundleShortVersionString" "$APP_PATH/Info.plist")"
+          echo "Build Version: $(/usr/libexec/PlistBuddy -c "Print CFBundleVersion" "$APP_PATH/Info.plist")"
           codesign -dv --verbose=4 "$APP_PATH"
 
     artifacts:
       - $HOME/build/xcodebuild.log
       - $HOME/build/export_log.txt
+      - ios/App/Pods/Pods.xcodeproj/project.pbxproj
       - $HOME/build/ipa/*.ipa
     publishing:
       app_store_connect:
