@@ -389,17 +389,21 @@ workflows:
           EOF
           fi
           
-          # 3. Check for static library in all possible locations
+          # 3. Updated search paths for Xcode 16.4
           LIB_PATHS=(
             "Pods/Capacitor/libCapacitor.a"
             "Pods/build/Release-iphoneos/Capacitor/libCapacitor.a"
             "DerivedData/Build/Products/Release-iphoneos/Capacitor/libCapacitor.a"
+            "Pods/Target Support Files/Capacitor/libCapacitor.a"
+            "build/Pods/Release-iphoneos/Capacitor/libCapacitor.a"
+            "${PODS_CONFIGURATION_BUILD_DIR}/Capacitor/libCapacitor.a"
           )
           
           FOUND_LIB=""
           for path in "${LIB_PATHS[@]}"; do
             if [ -f "$path" ]; then
               FOUND_LIB="$path"
+              echo "ℹ️ Found library candidate at: $path"
               break
             fi
           done
@@ -410,24 +414,35 @@ workflows:
             exit 0
           fi
           
-          # 4. If not found, try building it explicitly
-          echo "ℹ️ Capacitor static library not found, building..."
+          # 4. If not found, try building it explicitly with Xcode 16.4 parameters
+          echo "ℹ️ Capacitor static library not found, building explicitly..."
           xcodebuild \
             -workspace App.xcworkspace \
             -scheme Capacitor \
             -configuration Release \
             -sdk iphoneos \
+            -derivedDataPath DerivedData \
             BUILD_LIBRARY_FOR_DISTRIBUTION=YES \
             MACH_O_TYPE=staticlib \
             ONLY_ACTIVE_ARCH=NO \
             SKIP_INSTALL=NO \
+            CONFIGURATION_BUILD_DIR="${PWD}/StaticLibs" \
             build | tee capacitor_build.log
           
-          # Check again after building
+          # Check in new possible locations
+          LIB_PATHS+=(
+            "DerivedData/Build/Products/Release-iphoneos/Capacitor/libCapacitor.a"
+            "StaticLibs/Capacitor.framework/Capacitor"
+          )
+          
           for path in "${LIB_PATHS[@]}"; do
             if [ -f "$path" ]; then
               echo "✅ Successfully built Capacitor static library at: $path"
               echo "Architectures: $(lipo -info "$path")"
+              
+              # Ensure the library is in expected location for main build
+              mkdir -p Pods/Capacitor
+              cp "$path" Pods/Capacitor/libCapacitor.a
               exit 0
             fi
           done
@@ -526,7 +541,32 @@ workflows:
           NEW_BUILD=$((CURRENT_BUILD + 1))
           /usr/libexec/PlistBuddy -c "Set CFBundleVersion $NEW_BUILD" "$PLIST_PATH"
           echo "Updated build number from $CURRENT_BUILD to $NEW_BUILD"
-
+      - name: Verify Build Environment
+        script: |
+          echo "=== BUILD ENVIRONMENT VERIFICATION ==="
+          cd ios/App
+          
+          # Verify Xcode version
+          XCODE_VERSION=$(xcodebuild -version | head -n 1)
+          echo "Using $XCODE_VERSION"
+          
+          # Verify CocoaPods version
+          POD_VERSION=$(pod --version)
+          echo "Using CocoaPods $POD_VERSION"
+          
+          # Verify static framework configuration
+          if ! grep -q "use_frameworks! :linkage => :static" Podfile; then
+            echo "❌ Static framework configuration missing from Podfile"
+            exit 1
+          fi
+          
+          # Verify modulemap exists
+          if [ ! -f "Pods/Headers/Public/Capacitor/module.modulemap" ]; then
+            echo "❌ Capacitor module.modulemap missing"
+            exit 1
+          fi
+          
+          echo "✅ Build environment verified"
       - name: Build IPA with Static Framework Support
         script: |
           echo "=== BUILDING WITH STATIC FRAMEWORK SUPPORT ==="
@@ -556,7 +596,7 @@ workflows:
                     BUILD_LIBRARY_FOR_DISTRIBUTION=YES \
                     SKIP_INSTALL=NO \
                     OTHER_LDFLAGS="-ObjC -all_load -lCapacitor -lCapacitorCordova" \
-                    LIBRARY_SEARCH_PATHS="\$(inherited) ${PODS_CONFIGURATION_BUILD_DIR}/Capacitor ${PODS_CONFIGURATION_BUILD_DIR}/CapacitorCordova ${PODS_ROOT}/../../node_modules/@capacitor/ios/Capacitor" \
+                    LIBRARY_SEARCH_PATHS="\$(inherited) ${PODS_CONFIGURATION_BUILD_DIR}/Capacitor ${PODS_CONFIGURATION_BUILD_DIR}/CapacitorCordova ${PODS_ROOT}/../../node_modules/@capacitor/ios/Capacitor ${PWD}/StaticLibs ${PWD}/DerivedData/Build/Products/Release-iphoneos"
                     FRAMEWORK_SEARCH_PATHS="\$(inherited) ${PODS_ROOT}/Capacitor ${PODS_ROOT}/CapacitorCordova" \
                     LD_RUNPATH_SEARCH_PATHS="@executable_path/Frameworks" \
                     ONLY_ACTIVE_ARCH=NO \
