@@ -196,11 +196,11 @@ workflows:
           use_frameworks! :linkage => :static
 
           target 'App' do
-            # Core Capacitor (static framework)
+            # Core Capacitor
             pod 'Capacitor', :path => '../../node_modules/@capacitor/ios', :modular_headers => true
             pod 'CapacitorCordova', :path => '../../node_modules/@capacitor/ios', :modular_headers => true
             
-            # All your installed Capacitor plugins
+            # Capacitor plugins
             pod 'CapacitorApp', :path => '../../node_modules/@capacitor/app'
             pod 'CapacitorBrowser', :path => '../../node_modules/@capacitor/browser'
             pod 'CapacitorCamera', :path => '../../node_modules/@capacitor/camera'
@@ -255,6 +255,7 @@ workflows:
                 end
               end
             end
+          end
             # Create required modulemap for static framework
             capacitor_dir = File.join(installer.sandbox.root, 'Headers/Public/Capacitor')
             FileUtils.mkdir_p(capacitor_dir)
