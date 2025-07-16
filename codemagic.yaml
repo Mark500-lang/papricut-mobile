@@ -307,7 +307,7 @@ workflows:
               export *
               module * { export * }
             }
-            MODULEMAP_EOF
+          MODULEMAP_EOF
           else
             echo "module.modulemap already exists"
           fi
