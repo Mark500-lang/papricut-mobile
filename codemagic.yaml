@@ -226,7 +226,7 @@ workflows:
             end
 
             # Create modulemap
-            File.write(File.join(capacitor_headers_dir, 'module.modulemap'), <<~MODULEMAP
+            File.write(File.join(capacitor_headers_dir, 'module.modulemap'), <<-MODULEMAP)
               framework module Capacitor {
                 umbrella header "Capacitor.h"
                 export *
@@ -234,13 +234,14 @@ workflows:
               }
             MODULEMAP
 
+            # Configure build settings
             installer.pods_project.targets.each do |target|
               target.build_configurations.each do |config|
-                # Common settings for all targets
+                # Common settings
                 config.build_settings['BUILD_LIBRARY_FOR_DISTRIBUTION'] = 'YES'
                 config.build_settings['CODE_SIGNING_ALLOWED'] = 'NO'
                 
-                # Special settings for Capacitor targets
+                # Capacitor-specific settings
                 if target.name.start_with?('Capacitor')
                   config.build_settings['DEFINES_MODULE'] = 'YES'
                   config.build_settings['CLANG_ENABLE_MODULES'] = 'YES'
@@ -248,7 +249,7 @@ workflows:
                   config.build_settings['HEADER_SEARCH_PATHS'] = '$(inherited) ${PODS_ROOT}/Headers/Public/Capacitor'
                 end
                 
-                # Keyboard plugin specific fixes
+                # Keyboard plugin specific
                 if target.name == 'CapacitorKeyboard'
                   config.build_settings['GCC_WARN_INHIBIT_ALL_WARNINGS'] = 'YES'
                   config.build_settings['CLANG_ALLOW_NON_MODULAR_INCLUDES_IN_FRAMEWORK_MODULES'] = 'YES'
