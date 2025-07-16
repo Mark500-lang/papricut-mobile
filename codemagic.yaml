@@ -214,7 +214,6 @@ workflows:
                 end
               end
             end
-          end
             # Create required modulemap for static framework
             capacitor_dir = File.join(installer.sandbox.root, 'Headers/Public/Capacitor')
             FileUtils.mkdir_p(capacitor_dir)
