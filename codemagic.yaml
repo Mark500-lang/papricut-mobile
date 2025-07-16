@@ -192,25 +192,46 @@ workflows:
           end
 
           post_install do |installer|
-            installer.pods_project.targets.each do |target|
-              target.build_configurations.each do |config|
-                # Common settings for all targets
-                config.build_settings['BUILD_LIBRARY_FOR_DISTRIBUTION'] = 'YES'
-                config.build_settings['CODE_SIGNING_ALLOWED'] = 'NO'
+          # Create required Capacitor headers directory
+          capacitor_headers_dir = File.join(installer.sandbox.root, 'Headers/Public/Capacitor')
+          FileUtils.mkdir_p(capacitor_headers_dir)
+
+          # Copy all headers from Capacitor
+          Dir.glob(File.join('../../node_modules/@capacitor/ios/Capacitor/Capacitor', '*.h')).each do |header|
+            header_name = File.basename(header)
+            dest = File.join(capacitor_headers_dir, header_name)
+            FileUtils.cp(header, dest) unless File.exist?(dest)
+          end
+
+          # Create module.modulemap
+          modulemap_content = <<~MODULEMAP
+            framework module Capacitor {
+              umbrella header "Capacitor.h"
+              export *
+              module * { export * }
+            }
+          MODULEMAP
+          File.write(File.join(capacitor_headers_dir, 'module.modulemap'), modulemap_content)
+
+          # Configure all targets
+          installer.pods_project.targets.each do |target|
+            target.build_configurations.each do |config|
+              # Common settings
+              config.build_settings['BUILD_LIBRARY_FOR_DISTRIBUTION'] = 'YES'
+              config.build_settings['CODE_SIGNING_ALLOWED'] = 'NO'
+              config.build_settings['SWIFT_VERSION'] = '5.0'
+              
+              # Special settings for Capacitor targets
+              if target.name.start_with?('Capacitor')
+                config.build_settings['DEFINES_MODULE'] = 'YES'
+                config.build_settings['CLANG_ENABLE_MODULES'] = 'YES'
+                config.build_settings['OTHER_CFLAGS'] = '-fmodule-map-file=${PODS_ROOT}/Headers/Public/Capacitor/module.modulemap'
                 
-                # Special settings for Capacitor targets
-                if target.name.start_with?('Capacitor')
-                  config.build_settings['DEFINES_MODULE'] = 'YES'
-                  config.build_settings['OTHER_CFLAGS'] = '-fmodule-map-file=${PODS_ROOT}/Headers/Public/Capacitor/module.modulemap'
-                  config.build_settings['SWIFT_VERSION'] = '5.0'
-                  config.build_settings['CLANG_ENABLE_MODULES'] = 'YES'
-                end
-                
-                # Specific fix for CapacitorKeyboard
+                # Fix for Keyboard plugin
                 if target.name == 'CapacitorKeyboard'
                   config.build_settings['GCC_WARN_INHIBIT_ALL_WARNINGS'] = 'YES'
-                  config.build_settings['SWIFT_SWIFT3_OBJC_INFERENCE'] = 'On'
                   config.build_settings['CLANG_ALLOW_NON_MODULAR_INCLUDES_IN_FRAMEWORK_MODULES'] = 'YES'
+                  config.build_settings['HEADER_SEARCH_PATHS'] = '$(inherited) ${PODS_ROOT}/Headers/Public/Capacitor'
                 end
               end
             end
@@ -584,6 +605,47 @@ workflows:
           fi
           
           echo "✅ Build environment verified"
+      - name: Verify Capacitor Headers
+        script: |
+          echo "=== VERIFYING CAPACITOR HEADERS ==="
+          cd ios/App
+          
+          # Check required headers exist
+          REQUIRED_HEADERS=(
+            "Pods/Headers/Public/Capacitor/Capacitor.h"
+            "Pods/Headers/Public/Capacitor/CAPBridgeViewController.h"
+            "Pods/Headers/Public/Capacitor/module.modulemap"
+          )
+          
+          for header in "${REQUIRED_HEADERS[@]}"; do
+            if [ ! -f "$header" ]; then
+              echo "❌ Missing required header: $header"
+              echo "Attempting to recreate..."
+              
+              # Create headers directory
+              mkdir -p Pods/Headers/Public/Capacitor
+              
+              # Copy headers from node_modules
+              cp ../../node_modules/@capacitor/ios/Capacitor/Capacitor/*.h Pods/Headers/Public/Capacitor/
+              
+              # Create modulemap
+              cat > Pods/Headers/Public/Capacitor/module.modulemap <<EOF
+          framework module Capacitor {
+            umbrella header "Capacitor.h"
+            export *
+            module * { export * }
+          }
+          EOF
+              
+              # Verify again
+              if [ ! -f "$header" ]; then
+                echo "❌ Still missing after recreation: $header"
+                exit 1
+              fi
+            fi
+          done
+          
+          echo "✅ All required headers present"
       - name: Build IPA with Static Framework Support
         script: |
           echo "=== BUILDING WITH STATIC FRAMEWORK SUPPORT ==="
@@ -624,6 +686,7 @@ workflows:
             GCC_PREPROCESSOR_DEFINITIONS="\$(inherited) CAPACITOR_ENABLE_STATIC_FRAMEWORK=1 CAPACITOR_USE_STATIC=1" \
             SWIFT_INCLUDE_PATHS="${PODS_ROOT}/Headers/Public/Capacitor" \
             CLANG_ENABLE_MODULES=YES \
+            HEADER_SEARCH_PATHS="\$(inherited) ${PODS_ROOT}/Headers/Public/Capacitor" \
             archive | tee "$HOME/build/xcodebuild.log"
           
           # Verify archive was created
