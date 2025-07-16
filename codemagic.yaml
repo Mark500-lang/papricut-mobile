@@ -27,23 +27,46 @@ workflows:
       - name: Complete Build Environment Cleanup
         script: |
           echo "=== COMPLETE BUILD ENVIRONMENT CLEANUP ==="
-          # Xcode caches
+          
+          # Xcode caches (more thorough)
           rm -rf ~/Library/Developer/Xcode/DerivedData/*
           rm -rf ~/Library/Caches/com.apple.dt.Xcode
+          rm -rf ~/Library/Developer/Xcode/Archives/*
+          rm -rf ~/Library/Developer/Xcode/iOS\ DeviceSupport/*
           
-          # Pods reset
+          # Pods reset (more comprehensive)
           rm -rf ios/App/Pods
           rm -rf ios/App/Podfile.lock
+          rm -rf ios/App/Podfile.lock.*
+          rm -rf ios/App/.symlinks
           
-          # Node cleanup
+          # Node/npm cleanup (more complete)
           rm -rf node_modules
+          rm -rf package-lock.json
           rm -rf .angular/cache
+          rm -rf .npm
+          rm -rf ~/.npm
           
-          # Capacitor iOS platform reset
+          # Capacitor iOS platform reset (added more paths)
           rm -rf ios/App/App/public
-          rm -rf ios/App/App.xcworkspace/xcuserdata
+          rm -rf ios/App/App.xcworkspace
+          rm -rf ios/App/App.xcodeproj/xcuserdata
+          rm -rf ios/App/App.xcodeproj/project.xcworkspace/xcuserdata
           
-          echo "✅ Environment cleaned"
+          # Additional iOS build artifacts
+          rm -rf ios/App/build
+          rm -rf ios/App/StaticLibs
+          
+          # Verify cleanup
+          echo "=== VERIFYING CLEANUP ==="
+          echo "Xcode caches:"
+          ls -la ~/Library/Developer/Xcode/DerivedData/ || echo "DerivedData removed"
+          echo "Pods directory:"
+          ls -la ios/App/Pods || echo "Pods removed"
+          echo "Node modules:"
+          ls -la node_modules || echo "node_modules removed"
+          
+          echo "✅ Environment thoroughly cleaned"
 
       - name: Install and Use Node 18
         script: |
