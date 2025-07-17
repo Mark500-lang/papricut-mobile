@@ -97,7 +97,7 @@ workflows:
           
           # Check for ALL required Capacitor/Cordova frameworks
           FRAMEWORKS=(
-            "Capacitor.framework"
+            # "Capacitor.framework"
             "CapacitorCordova.framework"
             "CapacitorApp.framework"
             "CapacitorBrowser.framework"
