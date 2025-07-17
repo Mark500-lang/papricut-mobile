@@ -69,7 +69,10 @@ workflows:
           PROFILE_UUID=$(grep UUID -A1 -a Papricut_AppStore_2025.mobileprovision | grep -io "[-A-F0-9]\{36\}")
           mv ~/Library/MobileDevice/Provisioning\ Profiles/Papricut_AppStore_2025.mobileprovision \
              ~/Library/MobileDevice/Provisioning\ Profiles/$PROFILE_UUID.mobileprovision
-
+          
+          # Add to "Configure Signing" phase
+          security cms -D -i Papricut_AppStore_2025.mobileprovision > profile.plist
+          /usr/libexec/PlistBuddy -c "Print TeamIdentifier:0" profile.plist
       # PHASE 4: BUILD WITH HARD VERIFICATION
       - name: Build & Validate
         script: |
@@ -90,13 +93,12 @@ workflows:
             clean archive | tee xcodebuild.log
 
           # 1. VERIFY SIGNING (updated check)
-          ARCHIVE_PATH="build/App.xcarchive"
-          codesign -dv --verbose=4 "$ARCHIVE_PATH/Products/Applications/App.app" | grep -q "TeamIdentifier=H9A4H444G4" || {
-            echo "❌ Code signing verification failed - Team ID mismatch";
-            echo "Actual signing info:";
-            codesign -dv --verbose=4 "$ARCHIVE_PATH/Products/Applications/App.app";
+          # In "Build & Validate" phase
+          TEAM_ID=$(codesign -dv --verbose=4 "$ARCHIVE_PATH/Products/Applications/App.app" 2>&1 | grep -o "TeamIdentifier=.*" | cut -d= -f2)
+          if [ "$TEAM_ID" != "H9A4H444G4" ]; then
+            echo "❌ Team ID mismatch. Expected: H9A4H444G4, Got: $TEAM_ID";
             exit 1;
-          }
+          fi
           
           # 2. Verify Capacitor is embedded
           [ -d "$ARCHIVE_PATH/Products/Applications/App.app/Frameworks/Capacitor.framework" ] || {
