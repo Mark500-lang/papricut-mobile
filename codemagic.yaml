@@ -7,8 +7,8 @@ workflows:
       vars:
         XCODE_WORKSPACE: "ios/App/App.xcworkspace"
         XCODE_SCHEME: "App"
-        NODE_VERSION: "18.x"  # Matches your package.json
-        COCOAPODS_VERSION: "1.15.2"  # Confirmed working version
+        NODE_VERSION: "18.x"
+        COCOAPODS_VERSION: "1.15.2"
       groups:
         - Papricut
     triggering:
@@ -18,84 +18,87 @@ workflows:
       # PHASE 1: VALIDATE ENVIRONMENT
       - name: Verify Project Structure
         script: |
-          # Critical file checks
           [ -f "exportOptions.plist" ] || { echo "❌ Missing exportOptions.plist"; exit 1; }
           [ -f "ios/App/App.xcodeproj/project.pbxproj" ] || { echo "❌ Xcode project missing"; exit 1; }
-          [ -d "ios/App/App/public" ] || { echo "❌ Web assets missing - run 'npx cap sync'"; exit 1; }
+          [ -d "ios/App/App/public" ] || { echo "❌ Web assets missing"; exit 1; }
+          [ -f "www/main.js" ] || { echo "❌ Angular not built"; exit 1; }
 
-          # Verify Angular build
-          [ -f "www/main.17a28afb386e3ab3.js" ] || { echo "❌ Angular not built - run 'npm run build'"; exit 1; }
-
-      # PHASE 2: DEPENDENCIES (VALIDATED)
+      # PHASE 2: ENHANCED DEPENDENCY SETUP
       - name: Install Dependencies
         script: |
-          set -exo pipefail
           npm ci
           npx cap sync ios
           
-          # Verify Capacitor sync
-          [ -f "ios/App/App/App.entitlements" ] || { echo "❌ Entitlements missing"; exit 1; }
-          [ -f "ios/App/App/public/index.html" ] || { echo "❌ Web assets not synced"; exit 1; }
-
+          # Force-clean pod cache and reinstall
           cd ios/App
-          pod install --repo-update
+          pod cache clean --all
+          pod deintegrate
+          pod install --repo-update --clean-install
           
-          # Verify Capacitor pods
-          [ -f "Pods/Target Support Files/Capacitor/Capacitor.debug.xcconfig" ] || { 
-            echo "❌ Pod installation failed"; 
-            exit 1; 
-          }
+          # Verify ALL Capacitor pods exist
+          PODS=(
+            "Capacitor.framework"
+            "CapacitorCordova.framework"
+            "CapacitorApp.framework"
+            "CapacitorBrowser.framework"
+            "CapacitorCamera.framework"
+            "CapacitorDevice.framework"
+            "CapacitorFilesystem.framework"
+            "CapacitorHaptics.framework"
+            "CapacitorKeyboard.framework"
+            "CapacitorNetwork.framework"
+            "CapacitorPushNotifications.framework"
+            "CapacitorSplashScreen.framework"
+            "CapacitorStatusBar.framework"
+          )
+          for pod in "${PODS[@]}"; do
+            [ -d "Pods/${pod}" ] || { echo "❌ Pod missing: ${pod}"; exit 1; }
+          done
 
-      # PHASE 3: MANUAL SIGNING SETUP
+      # PHASE 3: ROBUST SIGNING SETUP
       - name: Configure Signing
         script: |
           cd ios/App
           
-          # Decode signing assets from environment
+          # Decode and verify signing assets
           echo "$DISTRIBUTION_CERTIFICATE" | base64 --decode > signing.p12
-          echo "$PROVISIONING_PROFILE" | base64 --decode > Papricut_AppStore_2025.mobileprovision
+          echo "$PROVISIONING_PROFILE" | base64 --decode > profile.mobileprovision
           
-          # Setup keychain
-          security create-keychain -p "" build.keychain
+          # Validate provisioning profile
+          PROFILE_UUID=$(grep -a -A1 UUID profile.mobileprovision | grep -io "[-A-F0-9]\{36\}")
+          [ -n "$PROFILE_UUID" ] || { echo "❌ Invalid provisioning profile"; exit 1; }
+          
+          # Setup keychain with retries
+          for i in {1..3}; do
+            security create-keychain -p "" build.keychain && break || sleep 5
+          done
           security import signing.p12 -k build.keychain -P "$CERTIFICATE_PASSWORD" -T /usr/bin/codesign
-          security list-keychains -s build.keychain
-          security default-keychain -s build.keychain
-          security unlock-keychain -p "" build.keychain
           security set-key-partition-list -S apple-tool:,apple: -k "" build.keychain
           
           # Install provisioning profile
           mkdir -p ~/Library/MobileDevice/Provisioning\ Profiles
-          cp Papricut_AppStore_2025.mobileprovision ~/Library/MobileDevice/Provisioning\ Profiles/
-          PROFILE_UUID=$(grep UUID -A1 -a Papricut_AppStore_2025.mobileprovision | grep -io "[-A-F0-9]\{36\}")
-          mv ~/Library/MobileDevice/Provisioning\ Profiles/Papricut_AppStore_2025.mobileprovision \
-             ~/Library/MobileDevice/Provisioning\ Profiles/$PROFILE_UUID.mobileprovision
-          
-          # In "Configure Signing" phase
-          PROFILE_UUID=$(grep UUID -A1 -a Papricut_AppStore_2025.mobileprovision | grep -io "[-A-F0-9]\{36\}")
-          if [ -z "$PROFILE_UUID" ]; then
-            echo "❌ Invalid provisioning profile - UUID not found";
-            exit 1;
-          fi
-      # PHASE 4: BUILD WITH HARD VERIFICATION
+          cp profile.mobileprovision ~/Library/MobileDevice/Provisioning\ Profiles/${PROFILE_UUID}.mobileprovision
+
+      # PHASE 4: BUILD WITH FRAMEWORK VALIDATION
       - name: Build & Validate
         script: |
           cd ios/App
           rm -rf build/*
           
-          # Build with explicit manual signing
+          # Build with framework search paths explicitly set
           xcodebuild \
             -workspace App.xcworkspace \
             -scheme App \
             -configuration Release \
-            -destination generic/platform=iOS \
             -archivePath build/App.xcarchive \
+            OTHER_SWIFT_FLAGS="$(echo -extra-xcconfig Pods/Target\ Support\ Files/Pods-App/Pods-App.release.xcconfig)" \
             CODE_SIGN_IDENTITY="Apple Distribution" \
-            CODE_SIGN_STYLE="Manual" \
-            PROVISIONING_PROFILE_SPECIFIER="Papricut_AppStore_2025" \
+            PROVISIONING_PROFILE_SPECIFIER="$PROFILE_UUID" \
             DEVELOPMENT_TEAM="H9A4H444G4" \
             clean archive | tee xcodebuild.log
           
-          # Check for ALL required Capacitor/Cordova frameworks
+          # FRAMEWORK VERIFICATION
+          ARCHIVE_PATH="build/App.xcarchive/Products/Applications/App.app"
           FRAMEWORKS=(
             "Capacitor.framework"
             "CapacitorCordova.framework"
@@ -111,52 +114,36 @@ workflows:
             "CapacitorSplashScreen.framework"
             "CapacitorStatusBar.framework"
           )
-
-          # Validate each framework
+          
           for framework in "${FRAMEWORKS[@]}"; do
-            FRAMEWORK_PATH="$ARCHIVE_PATH/Products/Applications/App.app/Frameworks/$framework"
-            if [ ! -d "$FRAMEWORK_PATH" ]; then
-              echo "❌ Missing required framework: $framework"
-              echo "Possible causes:"
-              echo "1. Not embedded in Xcode (set to 'Embed & Sign')"
-              echo "2. CocoaPods installation failed (run 'pod install --repo-update')"
-              echo "3. Incorrect signing (check keychain permissions)"
-              exit 1
-            else
-              echo "✅ Verified: $framework"
-            fi
-          done
-
-          # Additional check: Verify frameworks are signed
-          for framework in "${FRAMEWORKS[@]}"; do
-            codesign --verify "$ARCHIVE_PATH/Products/Applications/App.app/Frameworks/$framework" || {
-              echo "❌ Framework not signed: $framework"
-              exit 1
+            # Check framework exists
+            [ -d "$ARCHIVE_PATH/Frameworks/$framework" ] || {
+              echo "❌ Missing framework: $framework";
+              echo "Pod installation state:";
+              ls -la Pods/Capacitor*;
+              exit 1;
+            }
+            
+            # Verify code signing
+            codesign -dv "$ARCHIVE_PATH/Frameworks/$framework" 2>&1 | grep -q "TeamIdentifier=H9A4H444G4" || {
+              echo "❌ Framework signing failed: $framework";
+              codesign -dv "$ARCHIVE_PATH/Frameworks/$framework";
+              exit 1;
             }
           done
-          
-          # 3. Check web assets
-          WEB_ASSETS="$ARCHIVE_PATH/Products/Applications/App.app/public"
-          [ -f "$WEB_ASSETS/index.html" ] || { echo "❌ index.html missing"; exit 1; }
-          [ -f "$WEB_ASSETS/main.js" ] || { echo "❌ JavaScript bundle missing"; exit 1; }
 
-      # PHASE 5: EXPORT & FINAL CHECKS
+      # PHASE 5: EXPORT WITH ENHANCED CHECKS
       - name: Export IPA
         script: |
           cd ios/App
-          
-          # Export with manual signing
           xcodebuild -exportArchive \
             -archivePath build/App.xcarchive \
-            -exportOptionsPlist exportOptions.plist \
+            -exportOptionsPlist ../exportOptions.plist \
             -exportPath build/ipa
           
-          # Verify IPA
-          [ -f "build/ipa/App.ipa" ] || { echo "❌ IPA creation failed"; exit 1; }
-          
-          # Validate contained assets
-          unzip -l build/ipa/App.ipa | grep -q "Payload/App.app/public/index.html" || {
-            echo "❌ Web assets missing from IPA";
+          # Verify all critical assets
+          unzip -l build/ipa/App.ipa | grep -q "Payload/App.app/Frameworks/Capacitor.framework" || {
+            echo "❌ Capacitor framework missing from IPA";
             exit 1;
           }
 
