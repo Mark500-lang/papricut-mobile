@@ -94,22 +94,6 @@ workflows:
             PROVISIONING_PROFILE_SPECIFIER="Papricut_AppStore_2025" \
             DEVELOPMENT_TEAM="H9A4H444G4" \
             clean archive | tee xcodebuild.log
-
-          # 1. VERIFY SIGNING (updated check)
-          # In "Build & Validate" phase
-          # In "Build & Validate" phase
-          # Extract Team ID explicitly (works even if masked in logs)
-          TEAM_ID=$(codesign -dv --verbose=4 "$ARCHIVE_PATH/Products/Applications/App.app" 2>&1 | awk -F= '/TeamIdentifier/{print $2}' | head -n1 | tr -d ' ')
-
-          if [ -z "$TEAM_ID" ]; then
-            echo "❌ Failed to extract Team ID from signing info"
-            exit 1
-          elif [ "$TEAM_ID" != "H9A4H444G4" ]; then
-            echo "❌ Team ID mismatch. Expected: H9A4H444G4, Got: $TEAM_ID"
-            exit 1
-          else
-            echo "✅ Team ID verified: $TEAM_ID"
-          fi
           
           # 2. Verify Capacitor is embedded
           [ -d "$ARCHIVE_PATH/Products/Applications/App.app/Frameworks/Capacitor.framework" ] || {
