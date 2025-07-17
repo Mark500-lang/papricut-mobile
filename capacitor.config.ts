@@ -16,11 +16,24 @@ const config: CapacitorConfig = {
     cleartext: false
   },
   ios: {
+    path: 'ios', // Explicit path to Xcode project
+    includePlugins: [
+      '@capacitor/app',
+      '@capacitor/browser',
+      '@capacitor/camera',
+      '@capacitor/device',
+      '@capacitor/filesystem',
+      '@capacitor/haptics',
+      '@capacitor/keyboard',
+      '@capacitor/network',
+      '@capacitor/push-notifications',
+      '@capacitor/splash-screen',
+      '@capacitor/status-bar'
+    ],
     limitsNavigationsToAppBoundDomains: true,
     scheme: 'App',
     backgroundColor: '#d1388b',
-    contentInset: 'automatic',
-    cordovaLinkerFlags: ['-ObjC']
+    contentInset: 'automatic'
   },
   android: {
     allowMixedContent: false,
@@ -29,7 +42,7 @@ const config: CapacitorConfig = {
   },
   plugins: {
     SplashScreen: {
-      launchShowDuration: 0, // Immediate hide for faster navigation
+      launchShowDuration: 0,
       launchAutoHide: true,
       backgroundColor: '#d1388b',
       splashFullScreen: true,
@@ -38,7 +51,7 @@ const config: CapacitorConfig = {
       androidScaleType: 'CENTER_CROP',
       iosSpinnerStyle: 'large',
       spinnerColor: '#ffffff',
-      showSpinner: false, // Disable spinner for cleaner UX
+      showSpinner: false,
       layoutName: 'launch_screen',
       useDialog: false
     },
