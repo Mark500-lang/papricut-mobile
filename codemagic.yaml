@@ -21,7 +21,7 @@ workflows:
           [ -f "exportOptions.plist" ] || { echo "❌ Missing exportOptions.plist"; exit 1; }
           [ -f "ios/App/App.xcodeproj/project.pbxproj" ] || { echo "❌ Xcode project missing"; exit 1; }
           [ -d "ios/App/App/public" ] || { echo "❌ Web assets missing"; exit 1; }
-          [ -f "www/main.js" ] || { echo "❌ Angular not built"; exit 1; }
+          [ -f "www/main.17a28afb386e3ab3.js" ] || { echo "❌ Angular not built"; exit 1; }
 
       # PHASE 2: ENHANCED DEPENDENCY SETUP
       - name: Install Dependencies
