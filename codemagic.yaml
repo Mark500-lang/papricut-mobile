@@ -76,26 +76,25 @@ workflows:
           cd ios/App
           rm -rf build/*
           
-          # Build with manual signing
+          # Build with explicit manual signing
           xcodebuild \
             -workspace App.xcworkspace \
             -scheme App \
             -configuration Release \
             -destination generic/platform=iOS \
             -archivePath build/App.xcarchive \
-            CODE_SIGN_IDENTITY="iPhone Distribution" \
+            CODE_SIGN_IDENTITY="Apple Distribution" \
             CODE_SIGN_STYLE="Manual" \
             PROVISIONING_PROFILE_SPECIFIER="Papricut_AppStore_2025" \
             DEVELOPMENT_TEAM="H9A4H444G4" \
             clean archive | tee xcodebuild.log
 
-          # VERIFY BUILD ARTIFACTS
+          # 1. VERIFY SIGNING (updated check)
           ARCHIVE_PATH="build/App.xcarchive"
-          [ -d "$ARCHIVE_PATH" ] || { echo "❌ Archive failed"; exit 1; }
-          
-          # 1. Check signing
           codesign -dv --verbose=4 "$ARCHIVE_PATH/Products/Applications/App.app" | grep -q "TeamIdentifier=H9A4H444G4" || {
-            echo "❌ Code signing verification failed";
+            echo "❌ Code signing verification failed - Team ID mismatch";
+            echo "Actual signing info:";
+            codesign -dv --verbose=4 "$ARCHIVE_PATH/Products/Applications/App.app";
             exit 1;
           }
           
