@@ -1,0 +1,60 @@
+{
+	"appId": "papricut.app.mobile",
+	"appName": "Papricut",
+	"webDir": "www",
+	"server": {
+		"hostname": "papricut.com",
+		"androidScheme": "https",
+		"iosScheme": "https",
+		"allowNavigation": [
+			"account.papricut.com",
+			"api.papricut.com",
+			"cdn.papricut.com"
+		],
+		"cleartext": false
+	},
+	"ios": {
+		"path": "ios",
+		"includePlugins": [
+			"@capacitor/app",
+			"@capacitor/browser",
+			"@capacitor/camera",
+			"@capacitor/device",
+			"@capacitor/filesystem",
+			"@capacitor/haptics",
+			"@capacitor/keyboard",
+			"@capacitor/network",
+			"@capacitor/push-notifications",
+			"@capacitor/splash-screen",
+			"@capacitor/status-bar"
+		],
+		"limitsNavigationsToAppBoundDomains": true,
+		"scheme": "App",
+		"backgroundColor": "#d1388b",
+		"contentInset": "automatic"
+	},
+	"android": {
+		"allowMixedContent": false,
+		"backgroundColor": "#d1388b",
+		"webContentsDebuggingEnabled": false
+	},
+	"plugins": {
+		"SplashScreen": {
+			"launchShowDuration": 0,
+			"launchAutoHide": true,
+			"backgroundColor": "#d1388b",
+			"splashFullScreen": true,
+			"splashImmersive": true,
+			"androidSplashResourceName": "splash",
+			"androidScaleType": "CENTER_CROP",
+			"iosSpinnerStyle": "large",
+			"spinnerColor": "#ffffff",
+			"showSpinner": false,
+			"layoutName": "launch_screen",
+			"useDialog": false
+		},
+		"CapacitorHttp": {
+			"enabled": true
+		}
+	}
+}
