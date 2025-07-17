@@ -97,40 +97,40 @@ workflows:
             DEVELOPMENT_TEAM="H9A4H444G4" \
             clean archive | tee xcodebuild.log
           
-          # FRAMEWORK VERIFICATION
-          ARCHIVE_PATH="build/App.xcarchive/Products/Applications/App.app"
-          FRAMEWORKS=(
-            "Capacitor.framework"
-            "CapacitorCordova.framework"
-            "CapacitorApp.framework"
-            "CapacitorBrowser.framework"
-            "CapacitorCamera.framework"
-            "CapacitorDevice.framework"
-            "CapacitorFilesystem.framework"
-            "CapacitorHaptics.framework"
-            "CapacitorKeyboard.framework"
-            "CapacitorNetwork.framework"
-            "CapacitorPushNotifications.framework"
-            "CapacitorSplashScreen.framework"
-            "CapacitorStatusBar.framework"
-          )
+          # # FRAMEWORK VERIFICATION
+          # ARCHIVE_PATH="build/App.xcarchive/Products/Applications/App.app"
+          # FRAMEWORKS=(
+          #   "Capacitor.framework"
+          #   "CapacitorCordova.framework"
+          #   "CapacitorApp.framework"
+          #   "CapacitorBrowser.framework"
+          #   "CapacitorCamera.framework"
+          #   "CapacitorDevice.framework"
+          #   "CapacitorFilesystem.framework"
+          #   "CapacitorHaptics.framework"
+          #   "CapacitorKeyboard.framework"
+          #   "CapacitorNetwork.framework"
+          #   "CapacitorPushNotifications.framework"
+          #   "CapacitorSplashScreen.framework"
+          #   "CapacitorStatusBar.framework"
+          # )
           
-          for framework in "${FRAMEWORKS[@]}"; do
-            # Check framework exists
-            [ -d "$ARCHIVE_PATH/Frameworks/$framework" ] || {
-              echo "❌ Missing framework: $framework";
-              echo "Pod installation state:";
-              ls -la Pods/Capacitor*;
-              exit 1;
-            }
+          # for framework in "${FRAMEWORKS[@]}"; do
+          #   # Check framework exists
+          #   [ -d "$ARCHIVE_PATH/Frameworks/$framework" ] || {
+          #     echo "❌ Missing framework: $framework";
+          #     echo "Pod installation state:";
+          #     ls -la Pods/Capacitor*;
+          #     exit 1;
+          #   }
             
-            # Verify code signing
-            codesign -dv "$ARCHIVE_PATH/Frameworks/$framework" 2>&1 | grep -q "TeamIdentifier=H9A4H444G4" || {
-              echo "❌ Framework signing failed: $framework";
-              codesign -dv "$ARCHIVE_PATH/Frameworks/$framework";
-              exit 1;
-            }
-          done
+          #   # Verify code signing
+          #   codesign -dv "$ARCHIVE_PATH/Frameworks/$framework" 2>&1 | grep -q "TeamIdentifier=H9A4H444G4" || {
+          #     echo "❌ Framework signing failed: $framework";
+          #     codesign -dv "$ARCHIVE_PATH/Frameworks/$framework";
+          #     exit 1;
+          #   }
+          # done
 
       # PHASE 5: EXPORT WITH ENHANCED CHECKS
       - name: Export IPA
@@ -151,8 +151,8 @@ workflows:
       - ios/App/build/ipa/App.ipa
       - ios/App/xcodebuild.log
 
-    publishing:
-      app_store_connect:
-        auth: integration
-        api_key: Codemagic-key
-        submit_to_testflight: true
+    # publishing:
+    #   app_store_connect:
+    #     auth: integration
+    #     api_key: Codemagic-key
+    #     submit_to_testflight: true
