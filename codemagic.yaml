@@ -95,11 +95,45 @@ workflows:
             DEVELOPMENT_TEAM="H9A4H444G4" \
             clean archive | tee xcodebuild.log
           
-          # 2. Verify Capacitor is embedded
-          [ -d "$ARCHIVE_PATH/Products/Applications/App.app/Frameworks/Capacitor.framework" ] || {
-            echo "❌ Capacitor framework missing";
-            exit 1;
-          }
+          # Check for ALL required Capacitor/Cordova frameworks
+          FRAMEWORKS=(
+            "Capacitor.framework"
+            "CapacitorCordova.framework"
+            "CapacitorApp.framework"
+            "CapacitorBrowser.framework"
+            "CapacitorCamera.framework"
+            "CapacitorDevice.framework"
+            "CapacitorFilesystem.framework"
+            "CapacitorHaptics.framework"
+            "CapacitorKeyboard.framework"
+            "CapacitorNetwork.framework"
+            "CapacitorPushNotifications.framework"
+            "CapacitorSplashScreen.framework"
+            "CapacitorStatusBar.framework"
+          )
+
+          # Validate each framework
+          for framework in "${FRAMEWORKS[@]}"; do
+            FRAMEWORK_PATH="$ARCHIVE_PATH/Products/Applications/App.app/Frameworks/$framework"
+            if [ ! -d "$FRAMEWORK_PATH" ]; then
+              echo "❌ Missing required framework: $framework"
+              echo "Possible causes:"
+              echo "1. Not embedded in Xcode (set to 'Embed & Sign')"
+              echo "2. CocoaPods installation failed (run 'pod install --repo-update')"
+              echo "3. Incorrect signing (check keychain permissions)"
+              exit 1
+            else
+              echo "✅ Verified: $framework"
+            fi
+          done
+
+          # Additional check: Verify frameworks are signed
+          for framework in "${FRAMEWORKS[@]}"; do
+            codesign --verify "$ARCHIVE_PATH/Products/Applications/App.app/Frameworks/$framework" || {
+              echo "❌ Framework not signed: $framework"
+              exit 1
+            }
+          done
           
           # 3. Check web assets
           WEB_ASSETS="$ARCHIVE_PATH/Products/Applications/App.app/public"
