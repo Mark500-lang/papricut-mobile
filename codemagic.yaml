@@ -45,7 +45,7 @@ workflows:
           pod install --repo-update --clean-install
           
           echo "=== Verifying Capacitor Pods ==="
-          [ -d "Pods/Capacitor/Capacitor.framework" ] || { echo "❌ Capacitor pod not installed"; exit 1; }
+          [ -d "Pods/Capacitor.framework" ] || { echo "❌ Capacitor pod not installed"; exit 1; }
 
       # PHASE 3: SIGNING SETUP
       - name: Configure Signing
