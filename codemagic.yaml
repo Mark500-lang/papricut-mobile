@@ -148,7 +148,7 @@ workflows:
           # Export with manual signing
           xcodebuild -exportArchive \
             -archivePath build/App.xcarchive \
-            -exportOptionsPlist exportOptions.plist \
+            # -exportOptionsPlist exportOptions.plist \
             -exportPath build/ipa
           
           # Verify IPA
