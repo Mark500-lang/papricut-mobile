@@ -1,6 +1,8 @@
 workflows:
   ios-production:
     name: iOS Production Build (Dynamic Linking)
+    integrations:
+      app_store_connect: Codemagic-key
     environment:
       vars:
         XCODE_WORKSPACE: "ios/App/App.xcworkspace"
