@@ -24,7 +24,7 @@ workflows:
       - name: Clean Workspace
         script: |
           echo "=== Cleaning Workspace ==="
-          rm -rf node_modules ios/Pods
+          rm -rf node_modules ios/Pods ios/App/Pods
           npm cache clean --force
 
       # PHASE 2: DEPENDENCY INSTALLATION
@@ -49,6 +49,9 @@ workflows:
           cat <<EOT > Podfile
           platform :ios, '13.0'
           use_frameworks! :linkage => :dynamic
+          
+          # Suppress CDN warning
+          install! 'cocoapods', :warn_for_unused_master_specs_repo => false
           
           target 'App' do
             # Capacitor Core
@@ -88,17 +91,26 @@ workflows:
           pod install --repo-update --clean-install
           
           echo "=== Verifying Capacitor Installation ==="
-          # Check for either xcframework or framework location
-          if [ -d "Pods/Capacitor/Capacitor.xcframework" ] || [ -d "Pods/Capacitor/Capacitor.framework" ]; then
-            echo "✅ Capacitor framework found"
-          else
-            echo "❌ Capacitor framework missing!"
+          # Check for Capacitor in expected locations
+          if [ -d "../../node_modules/@capacitor/ios/Capacitor" ] || 
+             [ -d "Pods/Capacitor" ] || 
+             [ -d "${PODS_ROOT}/Capacitor" ]; then
+            echo "✅ Capacitor installation verified"
+            echo "Framework locations:"
             find Pods -name "Capacitor*" -type d
+          else
+            echo "❌ Capacitor installation failed!"
+            echo "Checking node_modules:"
+            ls -la ../../node_modules/@capacitor/ios
+            echo "Checking Pods:"
+            ls -la Pods/
             exit 1
           fi
-      # PHASE 4: SIGNING SETUP
+
+      # Rest of your phases remain unchanged...
       - name: Configure Signing
         script: |
+          # Your existing signing setup
           set -e
           echo "=== Setting Up Signing ==="
           cd ios/App
@@ -119,12 +131,10 @@ workflows:
           mkdir -p ~/Library/MobileDevice/Provisioning\ Profiles
           cp profile.mobileprovision ~/Library/MobileDevice/Provisioning\ Profiles/"$PROFILE_UUID".mobileprovision
           
-          # Ensure Xcode project settings
           plutil -replace 'CODE_SIGN_STYLE' -string 'Manual' App.xcodeproj/project.pbxproj
           plutil -replace 'PROVISIONING_PROFILE_SPECIFIER' -string "$PROFILE_UUID" App.xcodeproj/project.pbxproj
           plutil -replace 'DEVELOPMENT_TEAM' -string "H9A4H444G4" App.xcodeproj/project.pbxproj
 
-      # PHASE 5: BUILD AND ARCHIVE
       - name: Build and Archive
         script: |
           set -e
@@ -144,7 +154,6 @@ workflows:
           echo "=== Verifying Archive ==="
           [ -d "build/App.xcarchive" ] || { echo "❌ Archive failed"; exit 1; }
 
-      # PHASE 6: EXPORT IPA
       - name: Export IPA
         script: |
           set -e
