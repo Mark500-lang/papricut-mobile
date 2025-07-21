@@ -142,18 +142,23 @@ workflows:
           DEVELOPMENT_TEAM = ""
           EOT
           
-          # Add search path to pod configurations
+          # Update Pods xcconfig files with absolute path
+          PODS_ROOT_ABS=$(pwd)/Pods
           find "Pods/Target Support Files" -name "*.*cconfig" | while read file; do
-            echo "HEADER_SEARCH_PATHS = \$(inherited) \${PODS_ROOT}/../" >> "$file"
-            echo "#include \"\${PODS_ROOT}/../disable-pod-signing.xcconfig\"" >> "$file"
+            echo "#include \"$(pwd)/disable-pod-signing.xcconfig\"" >> "$file"
           done
           
-          # Update main app project settings
+          # Fully convert to manual signing
           echo "=== Updating Project Settings ==="
           PBXPROJ="App.xcodeproj/project.pbxproj"
           cp "$PBXPROJ" "$PBXPROJ.bak"
           
-          # Set manual signing for main target only
+          # Remove any automatic signing settings
+          sed -i '' '/PROVISIONING_PROFILE_SPECIFIER/d' "$PBXPROJ"
+          sed -i '' '/CODE_SIGN_STYLE/d' "$PBXPROJ"
+          sed -i '' '/DEVELOPMENT_TEAM/d' "$PBXPROJ"
+          
+          # Add manual signing settings
           sed -i '' "/buildSettings = {/a \\
               CODE_SIGN_STYLE = Manual; \\
               PROVISIONING_PROFILE_SPECIFIER = \"$PROFILE_UUID\"; \\
@@ -172,19 +177,31 @@ workflows:
           # Clean build directory
           rm -rf build/*
           
-          # Build with explicit settings
+          # First clean the project
+          xcodebuild clean -workspace App.xcworkspace -scheme App
+          
+          # Then build with explicit settings
           xcodebuild \
-            -workspace App.xcodeproj/project.xcworkspace \
+            -workspace App.xcworkspace \
             -scheme App \
             -configuration Release \
             -archivePath build/App.xcarchive \
             CODE_SIGN_IDENTITY="Apple Distribution" \
             DEVELOPMENT_TEAM="H9A4H444G4" \
-            clean archive | tee xcodebuild.log
+            PROVISIONING_PROFILE_SPECIFIER="$PROFILE_UUID" \
+            CODE_SIGN_STYLE="Manual" \
+            archive | tee xcodebuild.log
           
           echo "=== Verifying Archive ==="
           [ -d "build/App.xcarchive" ] || { echo "❌ Archive failed"; exit 1; }
           echo "✅ Archive created successfully"
+      - name: Verify Configuration
+        script: |
+          cd ios/App
+          echo "=== Checking Configuration Files ==="
+          find . -name "*.xcconfig" -exec grep -l "disable-pod-signing" {} \;
+          echo "=== Current Signing Settings ==="
+          xcodebuild -showBuildSettings -workspace App.xcworkspace -scheme App | grep -i signing
       - name: Export IPA
         script: |
           set -e
