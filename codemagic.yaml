@@ -1,6 +1,6 @@
 workflows:
   ios-production:
-    name: iOS Production Build (Dynamic Linking) - Corrected V2
+    name: iOS Production Build (Dynamic Linking) - Corrected V4
     integrations:
       app_store_connect: Codemagic-key
     environment:
@@ -32,33 +32,31 @@ workflows:
           echo "=== Syncing Capacitor ==="
           npx cap sync ios
           
-          echo "=== Ensuring Dynamic Linking in Podfile ==="
-          # Ensure use_frameworks! :linkage => :dynamic is present and correctly placed in Podfile.
-          # This sed command will replace any existing use_frameworks! or add the dynamic linking line if not present.
+          echo "=== Ensuring Dynamic Linking and Modular Headers in Podfile ==="
           cd ios/App
-          # First, remove any existing use_frameworks! lines to prevent duplication or incorrect static linking
+          # First, remove any existing use_frameworks! or use_modular_headers! lines
           sed -i '' '/use_frameworks!/d' Podfile
-          # Then, add the dynamic linking line. If 'platform :ios' exists, add it after; otherwise, add at the top.
+          sed -i '' '/use_modular_headers!/d' Podfile
+
+          # Add use_frameworks! :linkage => :dynamic and use_modular_headers! after platform declaration or at top
+          # Corrected sed command for appending multiple lines with newlines
           if grep -q 'platform :ios' Podfile; then
-            sed -i '' '/platform :ios/a use_frameworks! :linkage => :dynamic' Podfile
-          else
-            sed -i '' '1i use_frameworks! :linkage => :dynamic' Podfile
+            sed -i '' '/platform :ios/a \
+            use_frameworks! :linkage => :dynamic\
+            use_modular_headers!' Podfile
+                      else
+                        sed -i '' '1i \
+            use_frameworks! :linkage => :dynamic\
+            use_modular_headers!' Podfile
           fi
           
           echo "=== Installing Pods ==="
-          # Corrected: use --all instead of --force for pod cache clean
           pod cache clean --all
-          # pod deintegrate is often problematic in CI; prefer a clean install with --repo-update --clean-install
-          # If issues persist, consider adding `rm -rf Pods/ Podfile.lock` before pod install
           pod install --repo-update --clean-install
           
           echo "=== Verifying Capacitor Pods ==="
-          # Check for Capacitor.xcframework within the Pods directory
           [ -d "Pods/Capacitor/Capacitor.xcframework" ] || { echo "❌ Capacitor.xcframework not found in Pods"; exit 1; }
           [ -d "Pods/Capacitor/Capacitor.framework" ] || { echo "❌ Capacitor.framework not found in Pods"; }
-          
-          # Verify the main Capacitor.framework is present in the build products directory after a successful build
-          # This check is more reliable after the build phase.
 
       # PHASE 3: SIGNING SETUP
       - name: Configure Signing
@@ -66,15 +64,12 @@ workflows:
           echo "=== Setting Up Signing ==="
           cd ios/App
           
-          # Decode signing assets
           echo "$DISTRIBUTION_CERTIFICATE" | base64 --decode > signing.p12
           echo "$PROVISIONING_PROFILE" | base64 --decode > profile.mobileprovision
           
-          # Extract profile UUID
           PROFILE_UUID=$(grep -a -A1 UUID profile.mobileprovision | grep -io "[-A-F0-9]\{36\}")
           [ -n "$PROFILE_UUID" ] || { echo "❌ Failed to extract profile UUID"; exit 1; }
           
-          # Configure keychain
           security create-keychain -p "" build.keychain
           security import signing.p12 -k build.keychain -P "$CERTIFICATE_PASSWORD" -T /usr/bin/codesign
           security list-keychains -s build.keychain
@@ -82,15 +77,9 @@ workflows:
           security unlock-keychain -p "" build.keychain
           security set-key-partition-list -S apple-tool:,apple: -k "" build.keychain
           
-          # Install provisioning profile
           mkdir -p ~/Library/MobileDevice/Provisioning\ Profiles
           cp profile.mobileprovision ~/Library/MobileDevice/Provisioning\ Profiles/"$PROFILE_UUID".mobileprovision
           
-          # Patch Xcode project for dynamic linking
-          # Ensure these plutil commands are correct for your Xcode project structure
-          # The 'objects.12D3D3C8240D3A2E000F3A2E' part is a specific object ID and might change.
-          # It's safer to use `xcode-project` gem or similar for robust project modifications.
-          # For now, assuming these paths are stable or will be manually verified.
           plutil -replace 'objects.12D3D3C8240D3A2E000F3A2E.buildSettings.ALWAYS_EMBED_SWIFT_STANDARD_LIBRARIES' -string 'YES' App.xcodeproj/project.pbxproj
           plutil -replace 'objects.12D3D3C8240D3A2E000F3A2E.buildSettings.LD_RUNPATH_SEARCH_PATHS' -string '@executable_path/Frameworks' App.xcodeproj/project.pbxproj
 
@@ -116,18 +105,15 @@ workflows:
           echo "=== Verifying Frameworks ==="
           ARCHIVE_PATH="build/App.xcarchive/Products/Applications/App.app"
           
-          # List of required Capacitor frameworks
           FRAMEWORKS=(
             "Capacitor.framework"
             "CapacitorCordova.framework"
             "CapacitorApp.framework"
             "CapacitorCamera.framework"
-            # Add other plugins here
           )
           
           for framework in "${FRAMEWORKS[@]}"; do
             echo "Checking $framework..."
-            # Verify framework exists
             [ -d "$ARCHIVE_PATH/Frameworks/$framework" ] || {
               echo "❌ Missing framework: $framework";
               echo "Directory contents:";
@@ -135,13 +121,11 @@ workflows:
               exit 1;
             }
             
-            # Verify dynamic linking
             file "$ARCHIVE_PATH/Frameworks/$framework/$framework" | grep -q 'dynamic library' || {
               echo "❌ Framework not dynamically linked: $framework";
               exit 1;
             }
             
-            # Verify code signing
             codesign -dv "$ARCHIVE_PATH/Frameworks/$framework" 2>&1 | grep -q "TeamIdentifier=H9A4H444G4" || {
               echo "❌ Framework signing failed: $framework";
               codesign -dv "$ARCHIVE_PATH/Frameworks/$framework";
@@ -149,7 +133,6 @@ workflows:
             }
           done
           
-          # Verify splash screen won't hang
           grep -q 'CAPBridgeViewController' "$ARCHIVE_PATH/App" || {
             echo "❌ Potential splash screen hang risk - CAPBridge not found";
             exit 1;
@@ -169,13 +152,11 @@ workflows:
           echo "=== Verifying IPA Contents ==="
           [ -f "build/ipa/App.ipa" ] || { echo "❌ IPA creation failed"; exit 1; }
           
-          # Check frameworks are packaged
           unzip -l build/ipa/App.ipa | grep -q "Payload/App.app/Frameworks/Capacitor.framework" || {
             echo "❌ Capacitor framework missing from IPA";
             exit 1;
           }
           
-          # Check web assets
           unzip -l build/ipa/App.ipa | grep -q "Payload/App.app/public/index.html" || {
             echo "❌ Web assets missing from IPA";
             exit 1;
