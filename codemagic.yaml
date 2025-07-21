@@ -147,9 +147,10 @@ workflows:
               LD_RUNPATH_SEARCH_PATHS = (\"@executable_path\/Frameworks\"); \\
               " "$PBXPROJ"
           
-          # Create pod signing override file in project root
+          # Create pod signing override file in correct location
           echo "=== Configuring Pod Signing ==="
-          cat <<EOT > disable-pod-signing.xcconfig
+          mkdir -p "Pods/Target Support Files"
+          cat <<EOT > "Pods/Target Support Files/disable-pod-signing.xcconfig"
           CODE_SIGNING_ALLOWED = NO
           CODE_SIGNING_REQUIRED = NO
           PROVISIONING_PROFILE_SPECIFIER = ""
@@ -159,7 +160,7 @@ workflows:
           # Add search path to pod configurations
           find "Pods/Target Support Files" -name "*.*cconfig" | while read file; do
             echo "HEADER_SEARCH_PATHS = \$(inherited) \$(PODS_ROOT)/../../" >> "$file"
-            echo "#include \"../../disable-pod-signing.xcconfig\"" >> "$file"
+            echo "#include \"disable-pod-signing.xcconfig\"" >> "$file"
           done
           
           echo "✅ Signing configuration complete"
@@ -180,8 +181,6 @@ workflows:
             -configuration Release \
             -archivePath build/App.xcarchive \
             CODE_SIGN_IDENTITY="Apple Distribution" \
-            CODE_SIGN_STYLE="Manual" \
-            PROVISIONING_PROFILE_SPECIFIER="$PROFILE_UUID" \
             DEVELOPMENT_TEAM="H9A4H444G4" \
             OTHER_CODE_SIGN_FLAGS="--deep" \
             clean archive | tee xcodebuild.log
