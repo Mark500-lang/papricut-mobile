@@ -133,14 +133,14 @@ workflows:
           mkdir -p ~/Library/MobileDevice/Provisioning\ Profiles
           cp profile.mobileprovision ~/Library/MobileDevice/Provisioning\ Profiles/"$PROFILE_UUID".mobileprovision
           
-          # Modify project settings - only for main app target
+          # Modify main app project settings
           echo "=== Updating Project Settings ==="
           PBXPROJ="App.xcodeproj/project.pbxproj"
           
           # Backup project file
           cp "$PBXPROJ" "$PBXPROJ.bak"
           
-          # Update only the main app target settings
+          # Update main app target settings
           sed -i '' "/buildSettings = {/a \\
               CODE_SIGN_STYLE = Manual; \\
               PROVISIONING_PROFILE_SPECIFIER = \"$PROFILE_UUID\"; \\
@@ -149,16 +149,19 @@ workflows:
               LD_RUNPATH_SEARCH_PATHS = (\"@executable_path\/Frameworks\"); \\
               " "$PBXPROJ"
           
+          # Create directory for pod signing config if it doesn't exist
+          mkdir -p "Pods/Target Support Files"
+          
           # Disable signing for all Capacitor pods
-          cat <<EOT > Pods/Target Support Files/disable-pod-signing.xcconfig
+          cat <<EOT > "Pods/Target Support Files/disable-pod-signing.xcconfig"
           CODE_SIGNING_ALLOWED = NO
           CODE_SIGNING_REQUIRED = NO
           PROVISIONING_PROFILE_SPECIFIER = 
           DEVELOPMENT_TEAM = 
           EOT
           
-          # Apply to all Capacitor pods
-          find Pods/Target\ Support\ Files -name "Pods-*-*.*cconfig" | while read file; do
+          # Apply to all Capacitor pod configurations
+          find "Pods/Target Support Files" -name "Pods-*-*.*cconfig" | while read file; do
             echo "#include \"disable-pod-signing.xcconfig\"" >> "$file"
           done
           
@@ -193,7 +196,7 @@ workflows:
           
           echo "=== Verifying Archive ==="
           [ -d "build/App.xcarchive" ] || { echo "❌ Archive failed"; exit 1; }
-          
+
       - name: Export IPA
         script: |
           set -e
