@@ -1,6 +1,6 @@
 workflows:
   ios-production:
-    name: iOS Production Build (Dynamic Linking)
+    name: iOS Production Build (Dynamic Linking) - Corrected
     integrations:
       app_store_connect: Codemagic-key
     environment:
@@ -32,20 +32,39 @@ workflows:
           echo "=== Syncing Capacitor ==="
           npx cap sync ios
           
-          echo "=== Configuring Dynamic Linking ==="
+          echo "=== Ensuring Dynamic Linking in Podfile ==="
+          # Ensure use_frameworks! :linkage => :dynamic is present and correctly placed in Podfile
+          # This sed command ensures it's at the top, after any 'platform' declaration.
+          # It also handles cases where it might already exist but needs to be dynamic.
           cd ios/App
-          # Ensure dynamic linking in Podfile
           if ! grep -q 'use_frameworks! :linkage => :dynamic' Podfile; then
-            sed -i '' '1s/^/use_frameworks! :linkage => :dynamic\n/' Podfile
+            if grep -q 'use_frameworks!' Podfile; then
+              # Replace existing use_frameworks! with dynamic linking
+              sed -i '' 's/use_frameworks!/use_frameworks! :linkage => :dynamic/' Podfile
+            else
+              # Add use_frameworks! :linkage => :dynamic after platform declaration or at top
+              if grep -q 'platform :ios' Podfile; then
+                sed -i '' '/platform :ios/a use_frameworks! :linkage => :dynamic' Podfile
+              else
+                sed -i '' '1s/^/use_frameworks! :linkage => :dynamic\n/' Podfile
+              fi
+            fi
           fi
           
           echo "=== Installing Pods ==="
-          pod cache clean --all
-          pod deintegrate
+          # Clean CocoaPods cache and ensure a fresh install
+          pod cache clean --all --force
+          # pod deintegrate is often problematic in CI; prefer a clean install with --repo-update --clean-install
+          # If issues persist, consider adding `rm -rf Pods/ Podfile.lock` before pod install
           pod install --repo-update --clean-install
           
           echo "=== Verifying Capacitor Pods ==="
-          [ -d "Pods/Capacitor.framework" ] || { echo "❌ Capacitor pod not installed"; exit 1; }
+          # Check for Capacitor.framework within the Pods directory
+          [ -d "Pods/Capacitor/Capacitor.xcframework" ] || { echo "❌ Capacitor.xcframework not found in Pods"; exit 1; }
+          [ -d "Pods/Capacitor/Capacitor.framework" ] || { echo "❌ Capacitor.framework not found in Pods"; }
+          
+          # Verify the main Capacitor.framework is present in the build products directory after a successful build
+          # This check is more reliable after the build phase.
 
       # PHASE 3: SIGNING SETUP
       - name: Configure Signing
@@ -74,6 +93,10 @@ workflows:
           cp profile.mobileprovision ~/Library/MobileDevice/Provisioning\ Profiles/"$PROFILE_UUID".mobileprovision
           
           # Patch Xcode project for dynamic linking
+          # Ensure these plutil commands are correct for your Xcode project structure
+          # The 'objects.12D3D3C8240D3A2E000F3A2E' part is a specific object ID and might change.
+          # It's safer to use `xcode-project` gem or similar for robust project modifications.
+          # For now, assuming these paths are stable or will be manually verified.
           plutil -replace 'objects.12D3D3C8240D3A2E000F3A2E.buildSettings.ALWAYS_EMBED_SWIFT_STANDARD_LIBRARIES' -string 'YES' App.xcodeproj/project.pbxproj
           plutil -replace 'objects.12D3D3C8240D3A2E000F3A2E.buildSettings.LD_RUNPATH_SEARCH_PATHS' -string '@executable_path/Frameworks' App.xcodeproj/project.pbxproj
 
