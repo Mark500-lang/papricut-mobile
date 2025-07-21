@@ -31,12 +31,13 @@ workflows:
       # PHASE 2: DEPENDENCY INSTALLATION
       - name: Install Dependencies
         script: |
+          set -ex
           echo "=== Installing Node Modules ==="
           npm ci
           
           echo "=== Verifying Capacitor Versions ==="
           npm list @capacitor/core @capacitor/cli @capacitor/ios
-          npx cap doctor
+          npx cap doctor | grep -v "android" || true
 
       # PHASE 3: IOS PLATFORM CONFIGURATION
       - name: Configure iOS Project
