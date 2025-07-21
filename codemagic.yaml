@@ -1,6 +1,6 @@
 workflows:
   ios-production:
-    name: iOS Production Build (Dynamic Linking) - Corrected
+    name: iOS Production Build (Dynamic Linking) - Corrected V2
     integrations:
       app_store_connect: Codemagic-key
     environment:
@@ -33,33 +33,27 @@ workflows:
           npx cap sync ios
           
           echo "=== Ensuring Dynamic Linking in Podfile ==="
-          # Ensure use_frameworks! :linkage => :dynamic is present and correctly placed in Podfile
-          # This sed command ensures it's at the top, after any 'platform' declaration.
-          # It also handles cases where it might already exist but needs to be dynamic.
+          # Ensure use_frameworks! :linkage => :dynamic is present and correctly placed in Podfile.
+          # This sed command will replace any existing use_frameworks! or add the dynamic linking line if not present.
           cd ios/App
-          if ! grep -q 'use_frameworks! :linkage => :dynamic' Podfile; then
-            if grep -q 'use_frameworks!' Podfile; then
-              # Replace existing use_frameworks! with dynamic linking
-              sed -i '' 's/use_frameworks!/use_frameworks! :linkage => :dynamic/' Podfile
-            else
-              # Add use_frameworks! :linkage => :dynamic after platform declaration or at top
-              if grep -q 'platform :ios' Podfile; then
-                sed -i '' '/platform :ios/a use_frameworks! :linkage => :dynamic' Podfile
-              else
-                sed -i '' '1s/^/use_frameworks! :linkage => :dynamic\n/' Podfile
-              fi
-            fi
+          # First, remove any existing use_frameworks! lines to prevent duplication or incorrect static linking
+          sed -i '' '/use_frameworks!/d' Podfile
+          # Then, add the dynamic linking line. If 'platform :ios' exists, add it after; otherwise, add at the top.
+          if grep -q 'platform :ios' Podfile; then
+            sed -i '' '/platform :ios/a use_frameworks! :linkage => :dynamic' Podfile
+          else
+            sed -i '' '1i use_frameworks! :linkage => :dynamic' Podfile
           fi
           
           echo "=== Installing Pods ==="
-          # Clean CocoaPods cache and ensure a fresh install
-          pod cache clean --all --force
+          # Corrected: use --all instead of --force for pod cache clean
+          pod cache clean --all
           # pod deintegrate is often problematic in CI; prefer a clean install with --repo-update --clean-install
           # If issues persist, consider adding `rm -rf Pods/ Podfile.lock` before pod install
           pod install --repo-update --clean-install
           
           echo "=== Verifying Capacitor Pods ==="
-          # Check for Capacitor.framework within the Pods directory
+          # Check for Capacitor.xcframework within the Pods directory
           [ -d "Pods/Capacitor/Capacitor.xcframework" ] || { echo "❌ Capacitor.xcframework not found in Pods"; exit 1; }
           [ -d "Pods/Capacitor/Capacitor.framework" ] || { echo "❌ Capacitor.framework not found in Pods"; }
           
