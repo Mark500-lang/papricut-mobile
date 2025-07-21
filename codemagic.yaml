@@ -16,7 +16,6 @@ workflows:
         - ~/.npm
         - node_modules
         - ios/Pods
-        - ios/App/Pods
     triggering:
       events:
         - push
@@ -25,8 +24,8 @@ workflows:
       - name: Clean Workspace
         script: |
           echo "=== Cleaning Workspace ==="
-          rm -rf node_modules ios/android ios/Pods
-          mkdir -p ios/App
+          rm -rf node_modules ios/Pods
+          npm cache clean --force
 
       # PHASE 2: DEPENDENCY INSTALLATION
       - name: Install Dependencies
@@ -68,8 +67,6 @@ workflows:
             pod 'CapacitorPushNotifications', :path => '../../node_modules/@capacitor/push-notifications'
             pod 'CapacitorSplashScreen', :path => '../../node_modules/@capacitor/splash-screen'
             pod 'CapacitorStatusBar', :path => '../../node_modules/@capacitor/status-bar'
-            
-            # Add any other native dependencies here
           end
           
           post_install do |installer|
@@ -87,15 +84,18 @@ workflows:
           EOT
           
           echo "=== Installing Pods ==="
+          pod repo update
           pod install --repo-update --clean-install
           
           echo "=== Verifying Capacitor Installation ==="
-          [ -d "Pods/Capacitor/Capacitor.xcframework" ] || {
-            echo "❌ Capacitor framework missing!";
-            find Pods -name "Capacitor*";
-            exit 1;
-          }
-
+          # Check for either xcframework or framework location
+          if [ -d "Pods/Capacitor/Capacitor.xcframework" ] || [ -d "Pods/Capacitor/Capacitor.framework" ]; then
+            echo "✅ Capacitor framework found"
+          else
+            echo "❌ Capacitor framework missing!"
+            find Pods -name "Capacitor*" -type d
+            exit 1
+          fi
       # PHASE 4: SIGNING SETUP
       - name: Configure Signing
         script: |
