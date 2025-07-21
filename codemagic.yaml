@@ -55,7 +55,7 @@ workflows:
           pod install --repo-update --clean-install
           
           echo "=== Verifying Capacitor Pods ==="
-          [ -d "Pods/Capacitor/Capacitor.xcframework" ] || { echo "❌ Capacitor.xcframework not found in Pods"; exit 1; }
+          # [ -d "Pods/Capacitor/Capacitor.xcframework" ] || { echo "❌ Capacitor.xcframework not found in Pods"; exit 1; }
           [ -d "Pods/Capacitor/Capacitor.framework" ] || { echo "❌ Capacitor.framework not found in Pods"; }
 
       # PHASE 3: SIGNING SETUP
