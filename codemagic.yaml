@@ -31,7 +31,6 @@ workflows:
       # PHASE 2: DEPENDENCY INSTALLATION
       - name: Install Dependencies
         script: |
-          set -ex
           echo "=== Installing Node Modules ==="
           npm ci
           
