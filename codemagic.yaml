@@ -107,7 +107,6 @@ workflows:
             exit 1
           fi
 
-      # Rest of your phases remain unchanged...
       - name: Configure Signing
         script: |
           set -ex
@@ -134,48 +133,47 @@ workflows:
           mkdir -p ~/Library/MobileDevice/Provisioning\ Profiles
           cp profile.mobileprovision ~/Library/MobileDevice/Provisioning\ Profiles/"$PROFILE_UUID".mobileprovision
           
-          # Modify project settings using Python for more reliable XML handling
+          # Modify project settings using direct string replacement
           echo "=== Updating Project Settings ==="
-          cat <<EOT > update_project.py
-          import plistlib
-          import sys
+          PBXPROJ="App.xcodeproj/project.pbxproj"
           
-          with open('App.xcodeproj/project.pbxproj', 'rb') as f:
-              plist = plistlib.load(f)
+          # Backup project file
+          cp "$PBXPROJ" "$PBXPROJ.bak"
           
-          objects = plist['objects']
-          for obj in objects.values():
-              if 'buildSettings' in obj:
-                  # Update all build configurations
-                  obj['buildSettings']['CODE_SIGN_STYLE'] = 'Manual'
-                  obj['buildSettings']['PROVISIONING_PROFILE_SPECIFIER'] = '$PROFILE_UUID'
-                  obj['buildSettings']['DEVELOPMENT_TEAM'] = 'H9A4H444G4'
-                  obj['buildSettings']['ALWAYS_EMBED_SWIFT_STANDARD_LIBRARIES'] = 'YES'
-                  obj['buildSettings']['LD_RUNPATH_SEARCH_PATHS'] = '@executable_path/Frameworks'
+          # Update settings - try multiple possible formats
+          sed -i '' "s/CODE_SIGN_STYLE = .*/CODE_SIGN_STYLE = Manual;/g" "$PBXPROJ"
+          sed -i '' "s/PROVISIONING_PROFILE_SPECIFIER = .*/PROVISIONING_PROFILE_SPECIFIER = \"$PROFILE_UUID\";/g" "$PBXPROJ"
+          sed -i '' "s/PROVISIONING_PROFILE = .*/PROVISIONING_PROFILE = \"$PROFILE_UUID\";/g" "$PBXPROJ"
+          sed -i '' "s/DEVELOPMENT_TEAM = .*/DEVELOPMENT_TEAM = H9A4H444G4;/g" "$PBXPROJ"
+          sed -i '' "s/ALWAYS_EMBED_SWIFT_STANDARD_LIBRARIES = .*/ALWAYS_EMBED_SWIFT_STANDARD_LIBRARIES = YES;/g" "$PBXPROJ"
+          sed -i '' "s/LD_RUNPATH_SEARCH_PATHS = .*/LD_RUNPATH_SEARCH_PATHS = (\"@executable_path\/Frameworks\");/g" "$PBXPROJ"
           
-          with open('App.xcodeproj/project.pbxproj', 'wb') as f:
-              plistlib.dump(plist, f)
-          EOT
-          
-          python3 update_project.py
+          # Alternative format for team ID if needed
+          sed -i '' "s/DEVELOPMENT_TEAM = .*/DEVELOPMENT_TEAM = \"H9A4H444G4\";/g" "$PBXPROJ"
           
           echo "=== Verifying Changes ==="
-          if ! grep -q "PROVISIONING_PROFILE_SPECIFIER = \"$PROFILE_UUID\"" App.xcodeproj/project.pbxproj; then
-            echo "❌ Failed to set PROVISIONING_PROFILE"
-            echo "Trying alternative method..."
+          if ! grep -q "PROVISIONING_PROFILE_SPECIFIER = \"$PROFILE_UUID\"" "$PBXPROJ"; then
+            echo "❌ Failed to set PROVISIONING_PROFILE_SPECIFIER"
+            echo "Trying alternative approach..."
             
-            # Fallback to direct string replacement
-            sed -i '' "s/PROVISIONING_PROFILE_SPECIFIER = \".*\"/PROVISIONING_PROFILE_SPECIFIER = \"$PROFILE_UUID\"/g" App.xcodeproj/project.pbxproj
-            sed -i '' "s/PROVISIONING_PROFILE = \".*\"/PROVISIONING_PROFILE = \"$PROFILE_UUID\"/g" App.xcodeproj/project.pbxproj
-            
-            grep -q "PROVISIONING_PROFILE_SPECIFIER = \"$PROFILE_UUID\"" App.xcodeproj/project.pbxproj || {
-              echo "❌ Still failed to set PROVISIONING_PROFILE"
-              exit 1
-            }
+            # Find the build configuration section and insert settings
+            sed -i '' "/buildSettings = {/a \\
+                PROVISIONING_PROFILE_SPECIFIER = \"$PROFILE_UUID\"; \\
+                DEVELOPMENT_TEAM = H9A4H444G4; \\
+                CODE_SIGN_STYLE = Manual; \\
+                " "$PBXPROJ"
           fi
           
-          echo "✅ Signing configuration complete" 
+          # Final verification
+          grep -q "PROVISIONING_PROFILE_SPECIFIER = \"$PROFILE_UUID\"" "$PBXPROJ" || {
+            echo "❌ Still failed to set PROVISIONING_PROFILE"
+            echo "Project file contents:"
+            grep -A 10 -B 10 "PROVISIONING_PROFILE" "$PBXPROJ" || true
+            exit 1
+          }
           
+          echo "✅ Signing configuration complete"
+
       - name: Build and Archive
         script: |
           set -e
