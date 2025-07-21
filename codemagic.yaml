@@ -134,24 +134,47 @@ workflows:
           mkdir -p ~/Library/MobileDevice/Provisioning\ Profiles
           cp profile.mobileprovision ~/Library/MobileDevice/Provisioning\ Profiles/"$PROFILE_UUID".mobileprovision
           
-          # Modify project settings using sed instead of plutil
+          # Modify project settings using Python for more reliable XML handling
           echo "=== Updating Project Settings ==="
-          PBXPROJ="App.xcodeproj/project.pbxproj"
+          cat <<EOT > update_project.py
+          import plistlib
+          import sys
           
-          # Backup project file
-          cp "$PBXPROJ" "$PBXPROJ.bak"
+          with open('App.xcodeproj/project.pbxproj', 'rb') as f:
+              plist = plistlib.load(f)
           
-          # Update settings
-          sed -i '' 's/CODE_SIGN_STYLE = Automatic;/CODE_SIGN_STYLE = Manual;/g' "$PBXPROJ"
-          sed -i '' "s/PROVISIONING_PROFILE_SPECIFIER = \"\";/PROVISIONING_PROFILE_SPECIFIER = \"$PROFILE_UUID\";/g" "$PBXPROJ"
-          sed -i '' "s/DEVELOPMENT_TEAM = \"\";/DEVELOPMENT_TEAM = \"H9A4H444G4\";/g" "$PBXPROJ"
-          sed -i '' 's/ALWAYS_EMBED_SWIFT_STANDARD_LIBRARIES = NO;/ALWAYS_EMBED_SWIFT_STANDARD_LIBRARIES = YES;/g' "$PBXPROJ"
-          sed -i '' 's/LD_RUNPATH_SEARCH_PATHS = .*/LD_RUNPATH_SEARCH_PATHS = "@executable_path\/Frameworks";/g' "$PBXPROJ"
+          objects = plist['objects']
+          for obj in objects.values():
+              if 'buildSettings' in obj:
+                  # Update all build configurations
+                  obj['buildSettings']['CODE_SIGN_STYLE'] = 'Manual'
+                  obj['buildSettings']['PROVISIONING_PROFILE_SPECIFIER'] = '$PROFILE_UUID'
+                  obj['buildSettings']['DEVELOPMENT_TEAM'] = 'H9A4H444G4'
+                  obj['buildSettings']['ALWAYS_EMBED_SWIFT_STANDARD_LIBRARIES'] = 'YES'
+                  obj['buildSettings']['LD_RUNPATH_SEARCH_PATHS'] = '@executable_path/Frameworks'
+          
+          with open('App.xcodeproj/project.pbxproj', 'wb') as f:
+              plistlib.dump(plist, f)
+          EOT
+          
+          python3 update_project.py
           
           echo "=== Verifying Changes ==="
-          grep -q 'CODE_SIGN_STYLE = Manual;' "$PBXPROJ" || { echo "❌ Failed to set CODE_SIGN_STYLE"; exit 1; }
-          grep -q "PROVISIONING_PROFILE_SPECIFIER = \"$PROFILE_UUID\"" "$PBXPROJ" || { echo "❌ Failed to set PROVISIONING_PROFILE"; exit 1; }
-          grep -q 'DEVELOPMENT_TEAM = "H9A4H444G4"' "$PBXPROJ" || { echo "❌ Failed to set DEVELOPMENT_TEAM"; exit 1; }
+          if ! grep -q "PROVISIONING_PROFILE_SPECIFIER = \"$PROFILE_UUID\"" App.xcodeproj/project.pbxproj; then
+            echo "❌ Failed to set PROVISIONING_PROFILE"
+            echo "Trying alternative method..."
+            
+            # Fallback to direct string replacement
+            sed -i '' "s/PROVISIONING_PROFILE_SPECIFIER = \".*\"/PROVISIONING_PROFILE_SPECIFIER = \"$PROFILE_UUID\"/g" App.xcodeproj/project.pbxproj
+            sed -i '' "s/PROVISIONING_PROFILE = \".*\"/PROVISIONING_PROFILE = \"$PROFILE_UUID\"/g" App.xcodeproj/project.pbxproj
+            
+            grep -q "PROVISIONING_PROFILE_SPECIFIER = \"$PROFILE_UUID\"" App.xcodeproj/project.pbxproj || {
+              echo "❌ Still failed to set PROVISIONING_PROFILE"
+              exit 1
+            }
+          fi
+          
+          echo "✅ Signing configuration complete" 
           
       - name: Build and Archive
         script: |
