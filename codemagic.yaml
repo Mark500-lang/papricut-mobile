@@ -1,6 +1,6 @@
 workflows:
   ios-production:
-    name: iOS Production Build (Dynamic Linking) - Corrected V4
+    name: iOS Production Build (Dynamic Linking) - Corrected V7
     integrations:
       app_store_connect: Codemagic-key
     environment:
@@ -39,7 +39,6 @@ workflows:
           sed -i '' '/use_modular_headers!/d' Podfile
 
           # Add use_frameworks! :linkage => :dynamic and use_modular_headers! after platform declaration or at top
-          # Corrected sed command for appending multiple lines with newlines
           if grep -q 'platform :ios' Podfile; then
             sed -i '' '/platform :ios/a \
             use_frameworks! :linkage => :dynamic\
@@ -55,8 +54,16 @@ workflows:
           pod install --repo-update --clean-install
           
           echo "=== Verifying Capacitor Pods ==="
-          # [ -d "Pods/Capacitor/Capacitor.xcframework" ] || { echo "❌ Capacitor.xcframework not found in Pods"; exit 1; }
-          [ -d "Pods/Capacitor/Capacitor.framework" ] || { echo "❌ Capacitor.framework not found in Pods"; }
+          # The Capacitor.xcframework is typically located at Pods/Capacitor/Capacitor.xcframework
+          # The previous check was too broad. Let's be more specific.
+          if [ -d "Pods/Capacitor/Capacitor.xcframework" ]; then
+            echo "✅ Capacitor.xcframework found at expected location: Pods/Capacitor/Capacitor.xcframework"
+          else
+            echo "❌ Capacitor.xcframework not found at expected location: Pods/Capacitor/Capacitor.xcframework"
+            echo "Listing contents of Pods/Capacitor for debugging:"
+            ls -R Pods/Capacitor
+            exit 1
+          fi
 
       # PHASE 3: SIGNING SETUP
       - name: Configure Signing
@@ -171,3 +178,4 @@ workflows:
         auth: integration
         api_key: Codemagic-key
         submit_to_testflight: true
+
