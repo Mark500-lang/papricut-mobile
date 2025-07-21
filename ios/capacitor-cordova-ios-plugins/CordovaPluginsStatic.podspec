@@ -11,6 +11,7 @@
     s.ios.deployment_target  = '13.0'
     s.xcconfig = {'GCC_PREPROCESSOR_DEFINITIONS' => '$(inherited) COCOAPODS=1 WK_WEB_VIEW_ONLY=1' }
     s.dependency 'CapacitorCordova'
+    s.pod_target_xcconfig = { 'OTHER_LDFLAGS' => '-ObjC' }
     s.swift_version  = '5.1'
     s.static_framework = true
   end

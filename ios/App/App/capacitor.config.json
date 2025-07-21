@@ -14,24 +14,13 @@
 		"cleartext": false
 	},
 	"ios": {
-		"path": "ios",
-		"includePlugins": [
-			"@capacitor/app",
-			"@capacitor/browser",
-			"@capacitor/camera",
-			"@capacitor/device",
-			"@capacitor/filesystem",
-			"@capacitor/haptics",
-			"@capacitor/keyboard",
-			"@capacitor/network",
-			"@capacitor/push-notifications",
-			"@capacitor/splash-screen",
-			"@capacitor/status-bar"
-		],
 		"limitsNavigationsToAppBoundDomains": true,
 		"scheme": "App",
 		"backgroundColor": "#d1388b",
-		"contentInset": "automatic"
+		"contentInset": "automatic",
+		"cordovaLinkerFlags": [
+			"-ObjC"
+		]
 	},
 	"android": {
 		"allowMixedContent": false,
