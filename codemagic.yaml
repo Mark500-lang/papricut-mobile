@@ -110,17 +110,19 @@ workflows:
       # Rest of your phases remain unchanged...
       - name: Configure Signing
         script: |
-          # Your existing signing setup
-          set -e
+          set -ex
           echo "=== Setting Up Signing ==="
           cd ios/App
           
+          # Import certificates
           echo "$DISTRIBUTION_CERTIFICATE" | base64 --decode > signing.p12
           echo "$PROVISIONING_PROFILE" | base64 --decode > profile.mobileprovision
           
+          # Extract provisioning profile UUID
           PROFILE_UUID=$(grep -a -A1 UUID profile.mobileprovision | grep -io "[-A-F0-9]\{36\}")
           [ -n "$PROFILE_UUID" ] || { echo "❌ Failed to extract profile UUID"; exit 1; }
           
+          # Set up keychain
           security create-keychain -p "" build.keychain
           security import signing.p12 -k build.keychain -P "$CERTIFICATE_PASSWORD" -T /usr/bin/codesign
           security list-keychains -s build.keychain
@@ -128,13 +130,29 @@ workflows:
           security unlock-keychain -p "" build.keychain
           security set-key-partition-list -S apple-tool:,apple: -k "" build.keychain
           
+          # Install provisioning profile
           mkdir -p ~/Library/MobileDevice/Provisioning\ Profiles
           cp profile.mobileprovision ~/Library/MobileDevice/Provisioning\ Profiles/"$PROFILE_UUID".mobileprovision
           
-          plutil -replace 'CODE_SIGN_STYLE' -string 'Manual' App.xcodeproj/project.pbxproj
-          plutil -replace 'PROVISIONING_PROFILE_SPECIFIER' -string "$PROFILE_UUID" App.xcodeproj/project.pbxproj
-          plutil -replace 'DEVELOPMENT_TEAM' -string "H9A4H444G4" App.xcodeproj/project.pbxproj
-
+          # Modify project settings using sed instead of plutil
+          echo "=== Updating Project Settings ==="
+          PBXPROJ="App.xcodeproj/project.pbxproj"
+          
+          # Backup project file
+          cp "$PBXPROJ" "$PBXPROJ.bak"
+          
+          # Update settings
+          sed -i '' 's/CODE_SIGN_STYLE = Automatic;/CODE_SIGN_STYLE = Manual;/g' "$PBXPROJ"
+          sed -i '' "s/PROVISIONING_PROFILE_SPECIFIER = \"\";/PROVISIONING_PROFILE_SPECIFIER = \"$PROFILE_UUID\";/g" "$PBXPROJ"
+          sed -i '' "s/DEVELOPMENT_TEAM = \"\";/DEVELOPMENT_TEAM = \"H9A4H444G4\";/g" "$PBXPROJ"
+          sed -i '' 's/ALWAYS_EMBED_SWIFT_STANDARD_LIBRARIES = NO;/ALWAYS_EMBED_SWIFT_STANDARD_LIBRARIES = YES;/g' "$PBXPROJ"
+          sed -i '' 's/LD_RUNPATH_SEARCH_PATHS = .*/LD_RUNPATH_SEARCH_PATHS = "@executable_path\/Frameworks";/g' "$PBXPROJ"
+          
+          echo "=== Verifying Changes ==="
+          grep -q 'CODE_SIGN_STYLE = Manual;' "$PBXPROJ" || { echo "❌ Failed to set CODE_SIGN_STYLE"; exit 1; }
+          grep -q "PROVISIONING_PROFILE_SPECIFIER = \"$PROFILE_UUID\"" "$PBXPROJ" || { echo "❌ Failed to set PROVISIONING_PROFILE"; exit 1; }
+          grep -q 'DEVELOPMENT_TEAM = "H9A4H444G4"' "$PBXPROJ" || { echo "❌ Failed to set DEVELOPMENT_TEAM"; exit 1; }
+          
       - name: Build and Archive
         script: |
           set -e
