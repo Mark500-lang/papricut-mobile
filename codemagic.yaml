@@ -201,32 +201,40 @@ workflows:
           /usr/libexec/PlistBuddy -c "Set CFBundleVersion $NEW_BUILD" "$PLIST_PATH"
           
           echo "Version set to: 4.2.2 (build $NEW_BUILD)"
-      - name: Verify Code Signing Setup
+      - name: Validate Build Environment
         script: |
-          echo "=== Full Signing Identity ==="
+          echo "=== Xcode Version ==="
+          xcodebuild -version
+          
+          echo "=== Available Signing Identities ==="
           security find-identity -v -p codesigning
           
-          echo "=== Provisioning Profile Contents ==="
-          security cms -D -i "$HOME/Library/MobileDevice/Provisioning Profiles/$PROFILE_UUID.mobileprovision"
+          echo "=== Provisioning Profile Info ==="
+          security cms -D -i "$HOME/Library/MobileDevice/Provisioning Profiles/$PROFILE_UUID.mobileprovision" | grep -A1 -E 'ApplicationIdentifierPrefix|application-identifier'
           
-          echo "=== Xcode Build Settings ==="
+          echo "=== Current Build Settings ==="
           cd ios/App
-          xcodebuild -showBuildSettings | grep -i signing
+          xcodebuild -showBuildSettings | grep -i 'PROVISIONING_PROFILE\|BUNDLE_IDENTIFIER\|CODE_SIGN'
       - name: Build and Archive
         script: |
+          set -ex
           cd ios/App
           
           # Clean previous builds
           rm -rf build/*
           
-          # Verify provisioning profile
+          # Verify provisioning profile exists
           PROFILE_PATH="$HOME/Library/MobileDevice/Provisioning Profiles/$PROFILE_UUID.mobileprovision"
           if [ ! -f "$PROFILE_PATH" ]; then
-            echo "❌ Provisioning profile not found at expected path: $PROFILE_PATH"
+            echo "❌ Provisioning profile not found at: $PROFILE_PATH"
             exit 1
           fi
           
-          # Build with explicit signing configuration
+          # Extract bundle ID from profile for verification
+          BUNDLE_ID=$(security cms -D -i "$PROFILE_PATH" | grep -aA1 application-identifier | grep string | sed 's/<string>//;s/<\/string>//' | awk -F'.' '{print $NF}')
+          echo "Profile contains bundle ID: $BUNDLE_ID"
+          
+          # Build with corrected signing parameters
           xcodebuild \
             -workspace App.xcworkspace \
             -scheme App \
@@ -234,30 +242,30 @@ workflows:
             -archivePath build/App.xcarchive \
             CODE_SIGN_IDENTITY="Apple Distribution" \
             DEVELOPMENT_TEAM="H9A4H444G4" \
-            PROVISIONING_PROFILE="$PROFILE_UUID" \  # Changed from SPECIFIER to explicit PROFILE
+            PROVISIONING_PROFILE="$PROFILE_UUID" \
             PROVISIONING_PROFILE_SPECIFIER="$PROFILE_UUID" \
             CODE_SIGN_STYLE="Manual" \
             OTHER_CODE_SIGN_FLAGS="--deep" \
-            clean archive | tee xcodebuild.log
+            clean archive
           
-          # Verify embedded provisioning profile
+          # Verify archive exists
+          if [ ! -d "build/App.xcarchive" ]; then
+            echo "❌ Archive failed - no xcarchive created"
+            exit 1
+          fi
+          
+          # Verify embedded provisioning
           EMBEDDED_PROFILE="build/App.xcarchive/Products/Applications/App.app/embedded.mobileprovision"
           if [ ! -f "$EMBEDDED_PROFILE" ]; then
             echo "❌ No embedded provisioning profile found"
-            echo "Debug info:"
-            codesign -vvv --deep --strict build/App.xcarchive/Products/Applications/App.app
+            echo "=== Debug Info ==="
+            ls -la "build/App.xcarchive/Products/Applications/App.app/"
             exit 1
           fi
           
           # Final signing verification
-          if ! codesign -dv --verbose=4 build/App.xcarchive/Products/Applications/App.app; then
-            echo "❌ Final signing verification failed"
-            echo "=== Debug Info ==="
-            codesign -vvv --deep --strict build/App.xcarchive/Products/Applications/App.app
-            exit 1
-          fi
-          
-          echo "✅ Build successfully signed"
+          codesign -vvv --deep --strict "build/App.xcarchive/Products/Applications/App.app"
+          echo "✅ Build successfully signed and validated"
       - name: Validate Archive
         script: |
           cd ios/App
