@@ -347,15 +347,18 @@ workflows:
           xcodebuild -showBuildSettings -workspace App.xcworkspace -scheme App | grep -i signing
       - name: Validate Export Environment
         script: |
-          echo "=== Network Connectivity ==="
+          echo "=== Network Test ==="
           curl -I https://developer.apple.com
           
-          echo "=== Provisioning Profile Contents ==="
+          echo "=== Team ID Verification ==="
+          echo "DEVELOPMENT_TEAM: $DEVELOPMENT_TEAM"
+          
+          echo "=== Bundle ID Verification ==="
+          /usr/libexec/PlistBuddy -c "Print :CFBundleIdentifier" "ios/App/build/App.xcarchive/Products/Applications/App.app/Info.plist"
+          
+          echo "=== Profile Contents ==="
           security cms -D -i "$HOME/Library/MobileDevice/Provisioning Profiles/$PROFILE_UUID.mobileprovision" | \
             grep -A1 -E 'application-identifier|com.apple.developer.team-identifier'
-          
-          echo "=== Bundle Identifier ==="
-          /usr/libexec/PlistBuddy -c "Print :CFBundleIdentifier" "ios/App/build/App.xcarchive/Products/Applications/App.app/Info.plist"
       - name: Export IPA
         script: |
           set -ex
