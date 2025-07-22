@@ -347,17 +347,51 @@ workflows:
           xcodebuild -showBuildSettings -workspace App.xcworkspace -scheme App | grep -i signing
       - name: Export IPA
         script: |
-          set -e
-          echo "=== Exporting IPA ==="
+          set -ex
           cd ios/App
           
+          # Create export options plist with correct entitlements
+          cat <<EOF > exportOptions.plist
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0">
+          <dict>
+              <key>compileBitcode</key>
+              <false/>
+              <key>method</key>
+              <string>app-store</string>
+              <key>provisioningProfiles</key>
+              <dict>
+                  <key>$(/usr/libexec/PlistBuddy -c "Print :CFBundleIdentifier" "build/App.xcarchive/Products/Applications/App.app/Info.plist")</key>
+                  <string>$PROFILE_UUID</string>
+              </dict>
+              <key>signingStyle</key>
+              <string>manual</string>
+              <key>stripSwiftSymbols</key>
+              <true/>
+              <key>teamID</key>
+              <string>$DEVELOPMENT_TEAM</string>
+              <key>uploadBitcode</key>
+              <false/>
+              <key>uploadSymbols</key>
+              <true/>
+          </dict>
+          </plist>
+          EOF
+          
+          # Export IPA with correct options
           xcodebuild -exportArchive \
             -archivePath build/App.xcarchive \
-            -exportOptionsPlist ../../exportOptions.plist \
+            -exportOptionsPlist exportOptions.plist \
             -exportPath build/ipa
           
-          echo "=== Verifying IPA ==="
-          [ -f "build/ipa/App.ipa" ] || { echo "❌ IPA creation failed"; exit 1; }
+          # Verify IPA
+          if [ ! -f "build/ipa/App.ipa" ]; then
+            echo "❌ IPA export failed"
+            exit 1
+          fi
+          
+          echo "✅ IPA successfully exported"
       
       - name: Final Verification
         script: |
