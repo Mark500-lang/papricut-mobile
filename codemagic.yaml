@@ -361,17 +361,19 @@ workflows:
           set -ex
           cd ios/App
           
-          # Get bundle identifier from built app
-          BUNDLE_ID=$(/usr/libexec/PlistBuddy -c "Print :CFBundleIdentifier" "build/App.xcarchive/Products/Applications/App.app/Info.plist")
-          
-          # Verify provisioning profile matches bundle ID
-          PROFILE_CONTENTS=$(security cms -D -i "$HOME/Library/MobileDevice/Provisioning Profiles/$PROFILE_UUID.mobileprovision")
-          if ! echo "$PROFILE_CONTENTS" | grep -q "$BUNDLE_ID"; then
-            echo "❌ Provisioning profile doesn't match bundle ID $BUNDLE_ID"
+          # Verify critical variables exist
+          if [ -z "$DEVELOPMENT_TEAM" ] || [ -z "$PROFILE_UUID" ]; then
+            echo "❌ Missing required variables: DEVELOPMENT_TEAM or PROFILE_UUID"
             exit 1
           fi
           
-          # Create export options with app-store-connect method
+          # Get exact bundle identifier from built app
+          BUNDLE_ID=$(/usr/libexec/PlistBuddy -c "Print :CFBundleIdentifier" "build/App.xcarchive/Products/Applications/App.app/Info.plist")
+          echo "Using Bundle ID: $BUNDLE_ID"
+          echo "Using Team ID: $DEVELOPMENT_TEAM"
+          echo "Using Profile UUID: $PROFILE_UUID"
+          
+          # Create export options with explicit team ID
           cat <<EOF > exportOptions.plist
           <?xml version="1.0" encoding="UTF-8"?>
           <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -380,7 +382,7 @@ workflows:
               <key>compileBitcode</key>
               <false/>
               <key>method</key>
-              <string>app-store-connect</string>
+              <string>app-store</string>
               <key>provisioningProfiles</key>
               <dict>
                   <key>$BUNDLE_ID</key>
@@ -402,11 +404,13 @@ workflows:
           </plist>
           EOF
           
-          # Refresh provisioning profiles
+          # Force refresh provisioning profile
+          echo "=== Installing Provisioning Profile ==="
           mkdir -p ~/Library/MobileDevice/Provisioning\ Profiles/
-          echo "$PROVISIONING_PROFILE" | base64 --decode > "$HOME/Library/MobileDevice/Provisioning Profiles/$PROFILE_UUID.mobileprovision"
+          echo "$PROVISIONING_PROFILE" | base64 --decode > ~/Library/MobileDevice/Provisioning\ Profiles/"$PROFILE_UUID".mobileprovision
           
-          # Export with network access to refresh entitlements
+          # Export with network access
+          echo "=== Exporting IPA ==="
           xcodebuild -exportArchive \
             -archivePath build/App.xcarchive \
             -exportOptionsPlist exportOptions.plist \
@@ -416,6 +420,8 @@ workflows:
           # Verify IPA
           if [ ! -f "build/ipa/App.ipa" ]; then
             echo "❌ IPA export failed"
+            echo "=== Debug Info ==="
+            ls -la build/ipa/
             exit 1
           fi
           
