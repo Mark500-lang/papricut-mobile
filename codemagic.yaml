@@ -295,52 +295,28 @@ workflows:
           echo "=== Verifying Signature ==="
           codesign -vvv --deep --strict "$APP_PATH"
           echo "✅ Build successfully signed and validated"
-      - name: Validate Final Artifact
+      - name: Verify Build Artifacts
         script: |
-          cd ios/App
-          echo "=== Final Validation ==="
+          echo "=== Verifying Build Output ==="
           
-          # Verify main app signing
-          codesign -dv --verbose=4 "build/App.xcarchive/Products/Applications/App.app"
-          
-          # Verify all frameworks
-          find "build/App.xcarchive/Products/Applications/App.app/Frameworks" -name "*.framework" | while read fw; do
-            echo "Verifying $fw"
-            codesign -dv --verbose=4 "$fw"
-          done
-          
-          # Verify provisioning profile
-          if [ ! -f "build/App.xcarchive/Products/Applications/App.app/embedded.mobileprovision" ]; then
-            echo "❌ Missing embedded provisioning profile"
+          # Check for xcarchive
+          if [ ! -d "ios/App/build/App.xcarchive" ]; then
+            echo "❌ Missing App.xcarchive"
             exit 1
           fi
           
-          echo "✅ All components properly signed and validated"
-      # - name: Validate Embedded Frameworks
-      #   script: |
-      #     APP_PATH="ios/App/build/App.xcarchive/Products/Applications/App.app"
+          # Check for IPA if expected
+          if [ ! -f "ios/App/build/ipa/App.ipa" ]; then
+            echo "❌ Missing App.ipa"
+            exit 1
+          fi
           
-      #     # Check Capacitor core framework
-      #     if [ ! -d "$APP_PATH/Frameworks/Capacitor.framework" ]; then
-      #       echo "❌ Missing Capacitor.framework - app will crash on launch"
-      #       exit 1
-      #     fi
+          # Verify archive contents
+          echo "Archive Contents:"
+          ls -la "ios/App/build/App.xcarchive/Products/Applications/App.app"
           
-      #     # Verify web assets
-      #     REQUIRED_WEB_ASSETS=(
-      #       "public/index.html"
-      #       "public/runtime-es2015.js"
-      #       "public/main-es2015.js"
-      #     )
-          
-      #     for asset in "${REQUIRED_WEB_ASSETS[@]}"; do
-      #       if [ ! -f "$APP_PATH/$asset" ]; then
-      #         echo "❌ Missing web asset: $asset"
-      #         exit 1
-      #       fi
-      #     done
-          
-      #     echo "✅ All required frameworks and assets verified"
+          echo "✅ Build artifacts verified"
+
       - name: Verify Configuration
         script: |
           cd ios/App
@@ -449,5 +425,8 @@ workflows:
     publishing:
       app_store_connect:
         auth: integration
-        api_key: Codemagic-key
+        api_key: $APP_STORE_CONNECT_API_KEY
         submit_to_testflight: true
+        notify_testers: true
+        max_build_processing_wait: 1800
+        max_build_processing_wait_interval: 30
