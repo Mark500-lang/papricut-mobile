@@ -221,7 +221,11 @@ workflows:
           # Clean previous builds
           rm -rf build/*
           
-          # Build with explicit signing (critical changes below)
+          # Verify signing assets exist
+          echo "=== Signing Identity Verification ==="
+          security find-identity -p codesigning -v
+          
+          # Build with explicit signing
           xcodebuild \
             -workspace App.xcworkspace \
             -scheme App \
@@ -237,6 +241,8 @@ workflows:
           # Immediate signing verification
           if ! codesign -dv --verbose=4 build/App.xcarchive/Products/Applications/App.app; then
             echo "❌ Critical: App not properly signed"
+            echo "=== Debug Info ==="
+            codesign -vvv --deep --strict build/App.xcarchive/Products/Applications/App.app
             exit 1
           fi
       - name: Validate Archive
@@ -258,6 +264,31 @@ workflows:
           codesign -d --entitlements - build/App.xcarchive/Products/Applications/App.app
           
           echo "✅ Archive validation passed"
+      - name: Validate Embedded Frameworks
+        script: |
+          APP_PATH="ios/App/build/App.xcarchive/Products/Applications/App.app"
+          
+          # Check Capacitor core framework
+          if [ ! -d "$APP_PATH/Frameworks/Capacitor.framework" ]; then
+            echo "❌ Missing Capacitor.framework - app will crash on launch"
+            exit 1
+          fi
+          
+          # Verify web assets
+          REQUIRED_WEB_ASSETS=(
+            "public/index.html"
+            "public/runtime-es2015.js"
+            "public/main-es2015.js"
+          )
+          
+          for asset in "${REQUIRED_WEB_ASSETS[@]}"; do
+            if [ ! -f "$APP_PATH/$asset" ]; then
+              echo "❌ Missing web asset: $asset"
+              exit 1
+            fi
+          done
+          
+          echo "✅ All required frameworks and assets verified"
       - name: Verify Configuration
         script: |
           cd ios/App
