@@ -182,20 +182,33 @@ workflows:
               " "$PBXPROJ"
           
           echo "✅ Signing configuration complete"
-
+      - name: Ensure Build Number Exists
+        script: |
+          PLIST_PATH="ios/App/App/Info.plist"
+          
+          # Initialize CFBundleVersion if missing
+          if ! /usr/libexec/PlistBuddy -c "Print CFBundleVersion" "$PLIST_PATH" &>/dev/null; then
+            echo "Adding missing CFBundleVersion"
+            /usr/libexec/PlistBuddy -c "Add CFBundleVersion string 1" "$PLIST_PATH"
+          fi
+          
+          # Set version to 4.2.2 explicitly
+          /usr/libexec/PlistBuddy -c "Set CFBundleShortVersionString 4.2.2" "$PLIST_PATH"
+          
+          # Increment build number
+          CURRENT_BUILD=$(/usr/libexec/PlistBuddy -c "Print CFBundleVersion" "$PLIST_PATH")
+          NEW_BUILD=$((CURRENT_BUILD + 1))
+          /usr/libexec/PlistBuddy -c "Set CFBundleVersion $NEW_BUILD" "$PLIST_PATH"
+          
+          echo "Version set to: 4.2.2 (build $NEW_BUILD)"
       - name: Build and Archive
         script: |
-          set -ex
-          echo "=== Building Archive ==="
           cd ios/App
           
-          # Clean build directory
+          # Clean previous builds
           rm -rf build/*
           
-          # First clean the project
-          xcodebuild clean -workspace App.xcworkspace -scheme App
-          
-          # Then build with explicit settings
+          # Build with explicit signing
           xcodebuild \
             -workspace App.xcworkspace \
             -scheme App \
@@ -205,11 +218,20 @@ workflows:
             DEVELOPMENT_TEAM="H9A4H444G4" \
             PROVISIONING_PROFILE_SPECIFIER="$PROFILE_UUID" \
             CODE_SIGN_STYLE="Manual" \
-            archive | tee xcodebuild.log
+            clean archive
           
-          echo "=== Verifying Archive ==="
-          [ -d "build/App.xcarchive" ] || { echo "❌ Archive failed"; exit 1; }
-          echo "✅ Archive created successfully"
+          # Verify the archive is signed
+          codesign -dv --verbose=4 build/App.xcarchive/Products/Applications/App.app
+      - name: Verify Signing Assets
+        script: |
+          echo "=== Available Signing Identities ==="
+          security find-identity -p codesigning -v
+          
+          echo "=== Installed Provisioning Profiles ==="
+          ls -la ~/Library/MobileDevice/Provisioning\ Profiles/
+          
+          echo "=== Active Code Signing Identity ==="
+          /usr/bin/env xcrun security find-identity -v -p codesigning
       - name: Verify Configuration
         script: |
           cd ios/App
