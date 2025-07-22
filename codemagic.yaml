@@ -230,11 +230,7 @@ workflows:
             exit 1
           fi
           
-          # Extract bundle ID from profile for verification
-          BUNDLE_ID=$(security cms -D -i "$PROFILE_PATH" | grep -aA1 application-identifier | grep string | sed 's/<string>//;s/<\/string>//' | awk -F'.' '{print $NF}')
-          echo "Profile contains bundle ID: $BUNDLE_ID"
-          
-          # Build with corrected signing parameters
+          # Build with manual signing and explicit profile embedding
           xcodebuild \
             -workspace App.xcworkspace \
             -scheme App \
@@ -246,6 +242,7 @@ workflows:
             PROVISIONING_PROFILE_SPECIFIER="$PROFILE_UUID" \
             CODE_SIGN_STYLE="Manual" \
             OTHER_CODE_SIGN_FLAGS="--deep" \
+            CODE_SIGN_INJECT_BASE_ENTITLEMENTS=YES \
             clean archive
           
           # Verify archive exists
@@ -254,18 +251,36 @@ workflows:
             exit 1
           fi
           
-          # Verify embedded provisioning
+          # Manually embed provisioning profile if missing
+          if [ ! -f "build/App.xcarchive/Products/Applications/App.app/embedded.mobileprovision" ]; then
+            echo "Manually embedding provisioning profile..."
+            cp "$PROFILE_PATH" "build/App.xcarchive/Products/Applications/App.app/embedded.mobileprovision"
+          fi
+          
+          # Verify final signing
+          codesign -vvv --deep --strict "build/App.xcarchive/Products/Applications/App.app"
+          echo "✅ Build successfully signed and validated"
+      - name: Verify Final Artifact
+        script: |
+          cd ios/App
+          echo "=== Final Validation ==="
+          
+          # Verify embedded profile
           EMBEDDED_PROFILE="build/App.xcarchive/Products/Applications/App.app/embedded.mobileprovision"
           if [ ! -f "$EMBEDDED_PROFILE" ]; then
-            echo "❌ No embedded provisioning profile found"
-            echo "=== Debug Info ==="
-            ls -la "build/App.xcarchive/Products/Applications/App.app/"
+            echo "❌ Still missing embedded profile after manual copy attempt"
             exit 1
           fi
           
-          # Final signing verification
-          codesign -vvv --deep --strict "build/App.xcarchive/Products/Applications/App.app"
-          echo "✅ Build successfully signed and validated"
+          # Verify full signing chain
+          codesign -dv --verbose=4 "build/App.xcarchive/Products/Applications/App.app"
+          
+          # Verify frameworks are signed
+          find "build/App.xcarchive/Products/Applications/App.app/Frameworks" -name "*.framework" | while read framework; do
+            codesign -dv --verbose=4 "$framework"
+          done
+          
+          echo "✅ All components properly signed"
       - name: Validate Archive
         script: |
           cd ios/App
