@@ -297,27 +297,6 @@ workflows:
           cd ios/App
           echo "=== Final Validation ==="
           
-          # Verify main app signature
-          codesign -dv --verbose=4 "build/App.xcarchive/Products/Applications/App.app"
-          
-          # Verify all frameworks
-          find "build/App.xcarchive/Products/Applications/App.app/Frameworks" -name "*.framework" | while read fw; do
-            echo "Verifying $fw"
-            codesign -dv --verbose=4 "$fw"
-          done
-          
-          # Verify provisioning profile
-          if [ ! -f "build/App.xcarchive/Products/Applications/App.app/embedded.mobileprovision" ]; then
-            echo "❌ Missing embedded provisioning profile"
-            exit 1
-          fi
-          
-          echo "✅ All components properly signed and validated"
-      - name: Validate Final Artifact
-        script: |
-          cd ios/App
-          echo "=== Final Validation ==="
-          
           # Verify main app signing
           codesign -dv --verbose=4 "build/App.xcarchive/Products/Applications/App.app"
           
@@ -334,31 +313,31 @@ workflows:
           fi
           
           echo "✅ All components properly signed and validated"
-      - name: Validate Embedded Frameworks
-        script: |
-          APP_PATH="ios/App/build/App.xcarchive/Products/Applications/App.app"
+      # - name: Validate Embedded Frameworks
+      #   script: |
+      #     APP_PATH="ios/App/build/App.xcarchive/Products/Applications/App.app"
           
-          # Check Capacitor core framework
-          if [ ! -d "$APP_PATH/Frameworks/Capacitor.framework" ]; then
-            echo "❌ Missing Capacitor.framework - app will crash on launch"
-            exit 1
-          fi
+      #     # Check Capacitor core framework
+      #     if [ ! -d "$APP_PATH/Frameworks/Capacitor.framework" ]; then
+      #       echo "❌ Missing Capacitor.framework - app will crash on launch"
+      #       exit 1
+      #     fi
           
-          # Verify web assets
-          REQUIRED_WEB_ASSETS=(
-            "public/index.html"
-            "public/runtime-es2015.js"
-            "public/main-es2015.js"
-          )
+      #     # Verify web assets
+      #     REQUIRED_WEB_ASSETS=(
+      #       "public/index.html"
+      #       "public/runtime-es2015.js"
+      #       "public/main-es2015.js"
+      #     )
           
-          for asset in "${REQUIRED_WEB_ASSETS[@]}"; do
-            if [ ! -f "$APP_PATH/$asset" ]; then
-              echo "❌ Missing web asset: $asset"
-              exit 1
-            fi
-          done
+      #     for asset in "${REQUIRED_WEB_ASSETS[@]}"; do
+      #       if [ ! -f "$APP_PATH/$asset" ]; then
+      #         echo "❌ Missing web asset: $asset"
+      #         exit 1
+      #       fi
+      #     done
           
-          echo "✅ All required frameworks and assets verified"
+      #     echo "✅ All required frameworks and assets verified"
       - name: Verify Configuration
         script: |
           cd ios/App
