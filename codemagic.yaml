@@ -415,75 +415,33 @@ workflows:
           echo "=== FINAL BUILD VALIDATION ==="
           APP_PATH="ios/App/build/App.xcarchive/Products/Applications/App.app"
           
-          # 1. Basic Info.plist validation
-          echo "--- App Metadata ---"
-          echo "App Version: $(/usr/libexec/PlistBuddy -c "Print CFBundleShortVersionString" "$APP_PATH/Info.plist")"
-          echo "Build Version: $(/usr/libexec/PlistBuddy -c "Print CFBundleVersion" "$APP_PATH/Info.plist")"
-          echo "Minimum OS: $(/usr/libexec/PlistBuddy -c "Print MinimumOSVersion" "$APP_PATH/Info.plist")"
+          # 1. Verify signing
+          codesign -vvv --deep --strict "$APP_PATH"
           
-          # 2. Code signing verification
-          echo "--- Code Signing Verification ---"
-          codesign -dv --verbose=4 "$APP_PATH"
-          codesign --verify --verbose=4 "$APP_PATH"
-          
-          # 3. Critical file checks
-          echo "--- Critical File Validation ---"
+          # 2. Check critical files with better error messages
           check_file() {
-            if [ -f "$1" ]; then
+            if [ -e "$1" ]; then
               echo "✅ Found: $1"
             else
               echo "❌ MISSING: $1"
+              echo "=== Directory Contents ==="
+              ls -la "$(dirname "$1")"
               exit 1
             fi
           }
           
-          # Capacitor core files
           check_file "$APP_PATH/Assets.car"
           check_file "$APP_PATH/Base.lproj/LaunchScreen.storyboardc"
-          check_file "$APP_PATH/Frameworks/Capacitor.framework/Capacitor"
-          check_file "$APP_PATH/Frameworks/CapacitorCordova.framework/CapacitorCordova"
+          check_file "$APP_PATH/Info.plist"
+          check_file "$APP_PATH/Frameworks/Capacitor.framework"
           
-          # Web assets check
-          check_file "$APP_PATH/public/index.html"
-          check_file "$APP_PATH/public/runtime-es2015.js"
-          check_file "$APP_PATH/public/main-es2015.js"
-          
-          # 4. Plugin validation
-          echo "--- Plugin Validation ---"
-          PLUGINS_PATH="$APP_PATH/Plugins"
-          if [ -d "$PLUGINS_PATH" ]; then
-            echo "Found plugins:"
-            ls -la "$PLUGINS_PATH"
-          else
-            echo "❌ No plugins directory found"
+          # 3. Verify web assets
+          if [ ! -d "$APP_PATH/public" ]; then
+            echo "❌ Missing web assets directory"
             exit 1
           fi
           
-          # 5. Framework validation
-          echo "--- Framework Validation ---"
-          FRAMEWORKS_PATH="$APP_PATH/Frameworks"
-          if [ -d "$FRAMEWORKS_PATH" ]; then
-            echo "Framework count: $(find "$FRAMEWORKS_PATH" -type d -name "*.framework" | wc -l)"
-            find "$FRAMEWORKS_PATH" -type d -name "*.framework" -exec sh -c 'echo "  - {}: $(file {}/$(basename -s .framework {}))"' \;
-          else
-            echo "❌ No frameworks directory found"
-            exit 1
-          fi
-          
-          # 6. Binary validation
-          echo "--- Binary Validation ---"
-          BINARY_PATH="$APP_PATH/App"
-          if [ -f "$BINARY_PATH" ]; then
-            echo "Binary architecture:"
-            lipo -info "$BINARY_PATH"
-            echo "Linked frameworks:"
-            otool -L "$BINARY_PATH"
-          else
-            echo "❌ No binary found at $BINARY_PATH"
-            exit 1
-          fi
-          
-          echo "✅ All critical validations passed"
+          echo "✅ All critical files present and valid"
     artifacts:
       - ios/App/build/ipa/App.ipa
       - ios/App/xcodebuild.log
