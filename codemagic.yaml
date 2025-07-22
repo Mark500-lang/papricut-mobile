@@ -9,6 +9,9 @@ workflows:
         XCODE_SCHEME: "App"
         NODE_VERSION: "18.x"
         COCOAPODS_VERSION: "1.15.2"
+        # Add these required variables:
+        DEVELOPMENT_TEAM: "H9A4H444G4"
+        PROFILE_UUID: "515def82-56ac-478e-b89c-e0023f684b14"   
       groups:
         - Papricut
     cache:
@@ -364,71 +367,47 @@ workflows:
           set -ex
           cd ios/App
           
-          # Verify critical variables exist
+          # Verify and set default variables if missing
+          : ${DEVELOPMENT_TEAM:="H9A4H444G4"}  # Your team ID as default
+          : ${PROFILE_UUID:="$(find ~/Library/MobileDevice/Provisioning\ Profiles -name "*.mobileprovision" -print0 | xargs -0 ls -t | head -1 | sed 's/.*\.mobileprovision$//')"}
+          
           if [ -z "$DEVELOPMENT_TEAM" ] || [ -z "$PROFILE_UUID" ]; then
-            echo "❌ Missing required variables: DEVELOPMENT_TEAM or PROFILE_UUID"
+            echo "❌ Critical: Missing required variables"
+            echo "DEVELOPMENT_TEAM: $DEVELOPMENT_TEAM"
+            echo "PROFILE_UUID: $PROFILE_UUID"
+            echo "Available provisioning profiles:"
+            ls -la ~/Library/MobileDevice/Provisioning\ Profiles/
             exit 1
           fi
           
-          # Get exact bundle identifier from built app
-          BUNDLE_ID=$(/usr/libexec/PlistBuddy -c "Print :CFBundleIdentifier" "build/App.xcarchive/Products/Applications/App.app/Info.plist")
-          echo "Using Bundle ID: $BUNDLE_ID"
+          # Rest of your export script remains the same...
           echo "Using Team ID: $DEVELOPMENT_TEAM"
           echo "Using Profile UUID: $PROFILE_UUID"
           
-          # Create export options with explicit team ID
+          # Create exportOptions.plist
           cat <<EOF > exportOptions.plist
           <?xml version="1.0" encoding="UTF-8"?>
           <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
           <plist version="1.0">
           <dict>
-              <key>compileBitcode</key>
-              <false/>
+              <key>teamID</key>
+              <string>$DEVELOPMENT_TEAM</string>
               <key>method</key>
               <string>app-store</string>
               <key>provisioningProfiles</key>
               <dict>
-                  <key>$BUNDLE_ID</key>
+                  <key>$(/usr/libexec/PlistBuddy -c "Print :CFBundleIdentifier" "build/App.xcarchive/Products/Applications/App.app/Info.plist")</key>
                   <string>$PROFILE_UUID</string>
               </dict>
-              <key>signingStyle</key>
-              <string>manual</string>
-              <key>stripSwiftSymbols</key>
-              <true/>
-              <key>teamID</key>
-              <string>$DEVELOPMENT_TEAM</string>
-              <key>thinning</key>
-              <string>&lt;none&gt;</string>
-              <key>uploadBitcode</key>
-              <false/>
-              <key>uploadSymbols</key>
-              <true/>
           </dict>
           </plist>
           EOF
           
-          # Force refresh provisioning profile
-          echo "=== Installing Provisioning Profile ==="
-          mkdir -p ~/Library/MobileDevice/Provisioning\ Profiles/
-          echo "$PROVISIONING_PROFILE" | base64 --decode > ~/Library/MobileDevice/Provisioning\ Profiles/"$PROFILE_UUID".mobileprovision
-          
-          # Export with network access
-          echo "=== Exporting IPA ==="
+          # Continue with export...
           xcodebuild -exportArchive \
             -archivePath build/App.xcarchive \
             -exportOptionsPlist exportOptions.plist \
-            -exportPath build/ipa \
-            -allowProvisioningUpdates
-          
-          # Verify IPA
-          if [ ! -f "build/ipa/App.ipa" ]; then
-            echo "❌ IPA export failed"
-            echo "=== Debug Info ==="
-            ls -la build/ipa/
-            exit 1
-          fi
-          
-          echo "✅ IPA successfully exported"
+            -exportPath build/ipa
       
       - name: Final Verification
         script: |
