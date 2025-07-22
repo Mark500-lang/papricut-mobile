@@ -201,19 +201,17 @@ workflows:
           /usr/libexec/PlistBuddy -c "Set CFBundleVersion $NEW_BUILD" "$PLIST_PATH"
           
           echo "Version set to: 4.2.2 (build $NEW_BUILD)"
-      - name: Verify Signing Assets
+      - name: Verify Code Signing Setup
         script: |
-          echo "=== Signing Identity Verification ==="
-          security find-identity -p codesigning -v
+          echo "=== Full Signing Identity ==="
+          security find-identity -v -p codesigning
           
-          echo "=== Provisioning Profile Check ==="
-          ls -la ~/Library/MobileDevice/Provisioning\ Profiles/
+          echo "=== Provisioning Profile Contents ==="
+          security cms -D -i "$HOME/Library/MobileDevice/Provisioning Profiles/$PROFILE_UUID.mobileprovision"
           
-          echo "=== Profile UUID Match ==="
-          if [ ! -f ~/Library/MobileDevice/Provisioning\ Profiles/"$PROFILE_UUID".mobileprovision ]; then
-            echo "❌ Provisioning profile not found!"
-            exit 1
-          fi
+          echo "=== Xcode Build Settings ==="
+          cd ios/App
+          xcodebuild -showBuildSettings | grep -i signing
       - name: Build and Archive
         script: |
           cd ios/App
@@ -221,11 +219,14 @@ workflows:
           # Clean previous builds
           rm -rf build/*
           
-          # Verify signing assets exist
-          echo "=== Signing Identity Verification ==="
-          security find-identity -p codesigning -v
+          # Verify provisioning profile
+          PROFILE_PATH="$HOME/Library/MobileDevice/Provisioning Profiles/$PROFILE_UUID.mobileprovision"
+          if [ ! -f "$PROFILE_PATH" ]; then
+            echo "❌ Provisioning profile not found at expected path: $PROFILE_PATH"
+            exit 1
+          fi
           
-          # Build with explicit signing
+          # Build with explicit signing configuration
           xcodebuild \
             -workspace App.xcworkspace \
             -scheme App \
@@ -233,18 +234,30 @@ workflows:
             -archivePath build/App.xcarchive \
             CODE_SIGN_IDENTITY="Apple Distribution" \
             DEVELOPMENT_TEAM="H9A4H444G4" \
+            PROVISIONING_PROFILE="$PROFILE_UUID" \  # Changed from SPECIFIER to explicit PROFILE
             PROVISIONING_PROFILE_SPECIFIER="$PROFILE_UUID" \
             CODE_SIGN_STYLE="Manual" \
             OTHER_CODE_SIGN_FLAGS="--deep" \
             clean archive | tee xcodebuild.log
           
-          # Immediate signing verification
+          # Verify embedded provisioning profile
+          EMBEDDED_PROFILE="build/App.xcarchive/Products/Applications/App.app/embedded.mobileprovision"
+          if [ ! -f "$EMBEDDED_PROFILE" ]; then
+            echo "❌ No embedded provisioning profile found"
+            echo "Debug info:"
+            codesign -vvv --deep --strict build/App.xcarchive/Products/Applications/App.app
+            exit 1
+          fi
+          
+          # Final signing verification
           if ! codesign -dv --verbose=4 build/App.xcarchive/Products/Applications/App.app; then
-            echo "❌ Critical: App not properly signed"
+            echo "❌ Final signing verification failed"
             echo "=== Debug Info ==="
             codesign -vvv --deep --strict build/App.xcarchive/Products/Applications/App.app
             exit 1
           fi
+          
+          echo "✅ Build successfully signed"
       - name: Validate Archive
         script: |
           cd ios/App
