@@ -370,7 +370,7 @@ workflows:
               <key>stripSwiftSymbols</key>
               <true/>
               <key>teamID</key>
-              <string>$DEVELOPMENT_TEAM</string>
+              <string>H9A4H444G4</string>
               <key>uploadBitcode</key>
               <false/>
               <key>uploadSymbols</key>
