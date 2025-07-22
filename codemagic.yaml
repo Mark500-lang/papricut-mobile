@@ -201,6 +201,19 @@ workflows:
           /usr/libexec/PlistBuddy -c "Set CFBundleVersion $NEW_BUILD" "$PLIST_PATH"
           
           echo "Version set to: 4.2.2 (build $NEW_BUILD)"
+      - name: Verify Signing Assets
+        script: |
+          echo "=== Signing Identity Verification ==="
+          security find-identity -p codesigning -v
+          
+          echo "=== Provisioning Profile Check ==="
+          ls -la ~/Library/MobileDevice/Provisioning\ Profiles/
+          
+          echo "=== Profile UUID Match ==="
+          if [ ! -f ~/Library/MobileDevice/Provisioning\ Profiles/"$PROFILE_UUID".mobileprovision ]; then
+            echo "❌ Provisioning profile not found!"
+            exit 1
+          fi
       - name: Build and Archive
         script: |
           cd ios/App
@@ -208,7 +221,7 @@ workflows:
           # Clean previous builds
           rm -rf build/*
           
-          # Build with explicit signing
+          # Build with explicit signing (critical changes below)
           xcodebuild \
             -workspace App.xcworkspace \
             -scheme App \
@@ -218,20 +231,33 @@ workflows:
             DEVELOPMENT_TEAM="H9A4H444G4" \
             PROVISIONING_PROFILE_SPECIFIER="$PROFILE_UUID" \
             CODE_SIGN_STYLE="Manual" \
-            clean archive
+            OTHER_CODE_SIGN_FLAGS="--deep" \
+            clean archive | tee xcodebuild.log
           
-          # Verify the archive is signed
-          codesign -dv --verbose=4 build/App.xcarchive/Products/Applications/App.app
-      - name: Verify Signing Assets
+          # Immediate signing verification
+          if ! codesign -dv --verbose=4 build/App.xcarchive/Products/Applications/App.app; then
+            echo "❌ Critical: App not properly signed"
+            exit 1
+          fi
+      - name: Validate Archive
         script: |
-          echo "=== Available Signing Identities ==="
-          security find-identity -p codesigning -v
+          cd ios/App
+          echo "=== Archive Validation ==="
           
-          echo "=== Installed Provisioning Profiles ==="
-          ls -la ~/Library/MobileDevice/Provisioning\ Profiles/
+          # Check signing
+          codesign -dv --verbose=4 build/App.xcarchive/Products/Applications/App.app
           
-          echo "=== Active Code Signing Identity ==="
-          /usr/bin/env xcrun security find-identity -v -p codesigning
+          # Verify embedded provisioning profile
+          EMBEDDED_PROFILE=build/App.xcarchive/Products/Applications/App.app/embedded.mobileprovision
+          if [ ! -f "$EMBEDDED_PROFILE" ]; then
+            echo "❌ No embedded provisioning profile found"
+            exit 1
+          fi
+          
+          # Verify entitlements
+          codesign -d --entitlements - build/App.xcarchive/Products/Applications/App.app
+          
+          echo "✅ Archive validation passed"
       - name: Verify Configuration
         script: |
           cd ios/App
