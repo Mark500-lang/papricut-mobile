@@ -223,7 +223,7 @@ workflows:
           # Clean previous builds
           rm -rf build/*
           
-          # Verify signing assets exist
+          # Verify signing assets
           echo "=== Verifying Signing Assets ==="
           security find-identity -v -p codesigning
           PROFILE_PATH="$HOME/Library/MobileDevice/Provisioning Profiles/$PROFILE_UUID.mobileprovision"
@@ -232,81 +232,72 @@ workflows:
             exit 1
           fi
           
-          # Update project settings to force signing
-          echo "=== Updating Project Settings ==="
-          PBXPROJ="App.xcodeproj/project.pbxproj"
-          
-          # Ensure CODE_SIGNING_ALLOWED=YES for all targets
-          sed -i '' 's/CODE_SIGNING_ALLOWED = NO/CODE_SIGNING_ALLOWED = YES/g' "$PBXPROJ"
-          sed -i '' 's/CODE_SIGNING_REQUIRED = NO/CODE_SIGNING_REQUIRED = YES/g' "$PBXPROJ"
-          
-          # Build with aggressive signing flags
-          echo "=== Building Archive ==="
+          # Build without signing (will sign manually later)
+          echo "=== Building Unsigned Archive ==="
           xcodebuild \
             -workspace App.xcworkspace \
             -scheme App \
             -configuration Release \
             -archivePath build/App.xcarchive \
-            CODE_SIGN_IDENTITY="Apple Distribution" \
-            DEVELOPMENT_TEAM="H9A4H444G4" \
-            PROVISIONING_PROFILE="$PROFILE_UUID" \
-            PROVISIONING_PROFILE_SPECIFIER="$PROFILE_UUID" \
-            CODE_SIGN_STYLE="Manual" \
-            OTHER_CODE_SIGN_FLAGS="--deep" \
-            CODE_SIGN_INJECT_BASE_ENTITLEMENTS=YES \
-            GCC_PREPROCESSOR_DEFINITIONS="FULL_CODE_SIGN=1" \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGN_IDENTITY="" \
+            CODE_SIGNING_REQUIRED=NO \
             clean archive
           
-          # Verify archive
+          # Verify archive exists
           if [ ! -d "build/App.xcarchive" ]; then
             echo "❌ Archive failed"
             exit 1
           fi
           
-          # Force signing if still not signed
-          if ! codesign -dv build/App.xcarchive/Products/Applications/App.app 2>/dev/null; then
-            echo "=== Performing Manual Signing ==="
-            # Extract entitlements first
-            codesign -d --entitlements :- "build/App.xcarchive/Products/Applications/App.app" > entitlements.plist
-            
-            # Sign with force
-            codesign --force --sign "Apple Distribution" \
-              --entitlements entitlements.plist \
-              --timestamp=none \
-              --generate-entitlement-der \
-              "build/App.xcarchive/Products/Applications/App.app"
-            
-            # Verify all frameworks
-            find "build/App.xcarchive/Products/Applications/App.app/Frameworks" -name "*.framework" | while read fw; do
-              codesign --force --sign "Apple Distribution" --preserve-metadata=identifier,entitlements "$fw"
-            done
-          fi
+          # Prepare entitlements
+          echo "=== Preparing Entitlements ==="
+          TEMP_ENTITLEMENTS=$(mktemp)
+          /usr/libexec/PlistBuddy -c "Print :Entitlements" "$(xcrun --show-sdk-platform-path)/Developer/SDKs/$(xcrun --show-sdk-platform-path).sdk/Entitlements.plist" > "$TEMP_ENTITLEMENTS"
+          
+          # Manual signing process
+          echo "=== Performing Manual Signing ==="
+          APP_PATH="build/App.xcarchive/Products/Applications/App.app"
+          
+          # 1. Embed provisioning profile
+          cp "$PROFILE_PATH" "$APP_PATH/embedded.mobileprovision"
+          
+          # 2. Sign frameworks first
+          find "$APP_PATH/Frameworks" -name "*.framework" | while read fw; do
+            codesign --force --sign "Apple Distribution" --preserve-metadata=identifier,entitlements "$fw"
+          done
+          
+          # 3. Sign main app bundle
+          codesign --force --sign "Apple Distribution" \
+            --entitlements "$TEMP_ENTITLEMENTS" \
+            --generate-entitlement-der \
+            "$APP_PATH"
           
           # Final verification
-          echo "=== Final Verification ==="
-          codesign -vvv --deep --strict "build/App.xcarchive/Products/Applications/App.app"
+          echo "=== Verifying Signature ==="
+          codesign -vvv --deep --strict "$APP_PATH"
           echo "✅ Build successfully signed and validated"
-      - name: Verify Final Artifact
+      - name: Validate Final Artifact
         script: |
           cd ios/App
           echo "=== Final Validation ==="
           
-          # Verify embedded profile
-          EMBEDDED_PROFILE="build/App.xcarchive/Products/Applications/App.app/embedded.mobileprovision"
-          if [ ! -f "$EMBEDDED_PROFILE" ]; then
-            echo "❌ Still missing embedded profile after manual copy attempt"
+          # Verify main app signature
+          codesign -dv --verbose=4 "build/App.xcarchive/Products/Applications/App.app"
+          
+          # Verify all frameworks
+          find "build/App.xcarchive/Products/Applications/App.app/Frameworks" -name "*.framework" | while read fw; do
+            echo "Verifying $fw"
+            codesign -dv --verbose=4 "$fw"
+          done
+          
+          # Verify provisioning profile
+          if [ ! -f "build/App.xcarchive/Products/Applications/App.app/embedded.mobileprovision" ]; then
+            echo "❌ Missing embedded provisioning profile"
             exit 1
           fi
           
-          # Verify full signing chain
-          codesign -dv --verbose=4 "build/App.xcarchive/Products/Applications/App.app"
-          
-          # Verify frameworks are signed
-          find "build/App.xcarchive/Products/Applications/App.app/Frameworks" -name "*.framework" | while read framework; do
-            codesign -dv --verbose=4 "$framework"
-          done
-          
-          echo "✅ All components properly signed"
+          echo "✅ All components properly signed and validated"
       - name: Validate Final Artifact
         script: |
           cd ios/App
