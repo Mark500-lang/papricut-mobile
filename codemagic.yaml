@@ -345,12 +345,33 @@ workflows:
           find . -name "*.xcconfig" -exec grep -l "disable-pod-signing" {} \;
           echo "=== Current Signing Settings ==="
           xcodebuild -showBuildSettings -workspace App.xcworkspace -scheme App | grep -i signing
+      - name: Validate Export Environment
+        script: |
+          echo "=== Network Connectivity ==="
+          curl -I https://developer.apple.com
+          
+          echo "=== Provisioning Profile Contents ==="
+          security cms -D -i "$HOME/Library/MobileDevice/Provisioning Profiles/$PROFILE_UUID.mobileprovision" | \
+            grep -A1 -E 'application-identifier|com.apple.developer.team-identifier'
+          
+          echo "=== Bundle Identifier ==="
+          /usr/libexec/PlistBuddy -c "Print :CFBundleIdentifier" "ios/App/build/App.xcarchive/Products/Applications/App.app/Info.plist"
       - name: Export IPA
         script: |
           set -ex
           cd ios/App
           
-          # Create export options plist with correct entitlements
+          # Get bundle identifier from built app
+          BUNDLE_ID=$(/usr/libexec/PlistBuddy -c "Print :CFBundleIdentifier" "build/App.xcarchive/Products/Applications/App.app/Info.plist")
+          
+          # Verify provisioning profile matches bundle ID
+          PROFILE_CONTENTS=$(security cms -D -i "$HOME/Library/MobileDevice/Provisioning Profiles/$PROFILE_UUID.mobileprovision")
+          if ! echo "$PROFILE_CONTENTS" | grep -q "$BUNDLE_ID"; then
+            echo "❌ Provisioning profile doesn't match bundle ID $BUNDLE_ID"
+            exit 1
+          fi
+          
+          # Create export options with app-store-connect method
           cat <<EOF > exportOptions.plist
           <?xml version="1.0" encoding="UTF-8"?>
           <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -359,10 +380,10 @@ workflows:
               <key>compileBitcode</key>
               <false/>
               <key>method</key>
-              <string>app-store</string>
+              <string>app-store-connect</string>
               <key>provisioningProfiles</key>
               <dict>
-                  <key>$(/usr/libexec/PlistBuddy -c "Print :CFBundleIdentifier" "build/App.xcarchive/Products/Applications/App.app/Info.plist")</key>
+                  <key>$BUNDLE_ID</key>
                   <string>$PROFILE_UUID</string>
               </dict>
               <key>signingStyle</key>
@@ -370,7 +391,9 @@ workflows:
               <key>stripSwiftSymbols</key>
               <true/>
               <key>teamID</key>
-              <string>H9A4H444G4</string>
+              <string>$DEVELOPMENT_TEAM</string>
+              <key>thinning</key>
+              <string>&lt;none&gt;</string>
               <key>uploadBitcode</key>
               <false/>
               <key>uploadSymbols</key>
@@ -379,11 +402,16 @@ workflows:
           </plist>
           EOF
           
-          # Export IPA with correct options
+          # Refresh provisioning profiles
+          mkdir -p ~/Library/MobileDevice/Provisioning\ Profiles/
+          echo "$PROVISIONING_PROFILE" | base64 --decode > "$HOME/Library/MobileDevice/Provisioning Profiles/$PROFILE_UUID.mobileprovision"
+          
+          # Export with network access to refresh entitlements
           xcodebuild -exportArchive \
             -archivePath build/App.xcarchive \
             -exportOptionsPlist exportOptions.plist \
-            -exportPath build/ipa
+            -exportPath build/ipa \
+            -allowProvisioningUpdates
           
           # Verify IPA
           if [ ! -f "build/ipa/App.ipa" ]; then
