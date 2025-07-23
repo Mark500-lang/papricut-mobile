@@ -9,7 +9,6 @@ workflows:
         XCODE_SCHEME: "App"
         NODE_VERSION: "18.x"
         COCOAPODS_VERSION: "1.15.2"
-        # Add these required variables:
         DEVELOPMENT_TEAM: "H9A4H444G4"
         PROFILE_UUID: "515def82-56ac-478e-b89c-e0023f684b14"   
       groups:
@@ -424,9 +423,5 @@ workflows:
 
     publishing:
       app_store_connect:
-        auth: integration
-        api_key: $APP_STORE_CONNECT_API_KEY
+        auth: integration  # Uses Codemagic's stored API key
         submit_to_testflight: true
-        notify_testers: true
-        max_build_processing_wait: 1800
-        max_build_processing_wait_interval: 30
