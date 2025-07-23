@@ -169,38 +169,38 @@ workflows:
               " "$PBXPROJ"
           
           echo "✅ Signing configuration complete"
-      # - name: Increment Build Number
-      #   script: |
-      #     cd ios/App
+      - name: Increment Build Number
+        script: |
+          cd ios/App
           
-      #     # Get current build number
-      #     PLIST_PATH="App/Info.plist"
-      #     CURRENT_BUILD=$(/usr/libexec/PlistBuddy -c "Print :CFBundleVersion" "$PLIST_PATH")
+          # Get current build number
+          PLIST_PATH="App/Info.plist"
+          CURRENT_BUILD=$(/usr/libexec/PlistBuddy -c "Print :CFBundleVersion" "$PLIST_PATH")
           
-      #     # Increment build number
-      #     NEW_BUILD=$((CURRENT_BUILD + 1))
-      #     /usr/libexec/PlistBuddy -c "Set :CFBundleVersion $NEW_BUILD" "$PLIST_PATH"
+          # Increment build number
+          NEW_BUILD=$((CURRENT_BUILD + 1))
+          /usr/libexec/PlistBuddy -c "Set :CFBundleVersion $NEW_BUILD" "$PLIST_PATH"
           
-      #     echo "Updated build number from $CURRENT_BUILD to $NEW_BUILD"
+          echo "Updated build number from $CURRENT_BUILD to $NEW_BUILD"
           
-      #     # Verify version info
-      #     echo "Version: $(/usr/libexec/PlistBuddy -c "Print :CFBundleShortVersionString" "$PLIST_PATH")"
-      #     echo "Build: $(/usr/libexec/PlistBuddy -c "Print :CFBundleVersion" "$PLIST_PATH")"
-      # - name: Verify Version Numbers
-      #   script: |
-      #     cd ios/App
+          # Verify version info
+          echo "Version: $(/usr/libexec/PlistBuddy -c "Print :CFBundleShortVersionString" "$PLIST_PATH")"
+          echo "Build: $(/usr/libexec/PlistBuddy -c "Print :CFBundleVersion" "$PLIST_PATH")"
+      - name: Verify Version Numbers
+        script: |
+          cd ios/App
           
-      #     # Get version info from built app
-      #     PLIST_PATH="build/App.xcarchive/Products/Applications/App.app/Info.plist"
-      #     echo "Final Version: $(/usr/libexec/PlistBuddy -c "Print :CFBundleShortVersionString" "$PLIST_PATH")"
-      #     echo "Final Build: $(/usr/libexec/PlistBuddy -c "Print :CFBundleVersion" "$PLIST_PATH")"
+          # Get version info from built app
+          PLIST_PATH="build/App.xcarchive/Products/Applications/App.app/Info.plist"
+          echo "Final Version: $(/usr/libexec/PlistBuddy -c "Print :CFBundleShortVersionString" "$PLIST_PATH")"
+          echo "Final Build: $(/usr/libexec/PlistBuddy -c "Print :CFBundleVersion" "$PLIST_PATH")"
           
-      #     # Verify build number > 1
-      #     BUILD_NUMBER=$(/usr/libexec/PlistBuddy -c "Print :CFBundleVersion" "$PLIST_PATH")
-      #     if [ "$BUILD_NUMBER" -le 1 ]; then
-      #       echo "❌ Build number must be greater than 1 for App Store Connect"
-      #       exit 1
-      #     fi
+          # Verify build number > 1
+          BUILD_NUMBER=$(/usr/libexec/PlistBuddy -c "Print :CFBundleVersion" "$PLIST_PATH")
+          if [ "$BUILD_NUMBER" -le 1 ]; then
+            echo "❌ Build number must be greater than 1 for App Store Connect"
+            exit 1
+          fi
       - name: Validate Build Environment
         script: |
           echo "=== Xcode Version ==="
