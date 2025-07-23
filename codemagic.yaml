@@ -108,21 +108,6 @@ workflows:
             ls -la Pods/
             exit 1
           fi
-      - name: Increment Build Number
-        script: |
-          set -ex
-          echo "=== Incrementing Build Number ==="
-          PLIST_PATH="ios/App/App/Info.plist"
-          
-          # Get current version and build numbers
-          CURRENT_VERSION=$(/usr/libexec/PlistBuddy -c "Print CFBundleShortVersionString" "$PLIST_PATH")
-          CURRENT_BUILD=$(/usr/libexec/PlistBuddy -c "Print CFBundleVersion" "$PLIST_PATH")
-          
-          # Increment build number (or set to 1 if empty)
-          NEW_BUILD=$((CURRENT_BUILD + 1))
-          /usr/libexec/PlistBuddy -c "Set CFBundleVersion $NEW_BUILD" "$PLIST_PATH"
-          
-          echo "✅ Updated build number from $CURRENT_BUILD to $NEW_BUILD (Version $CURRENT_VERSION)"
 
       - name: Configure Signing
         script: |
@@ -184,25 +169,38 @@ workflows:
               " "$PBXPROJ"
           
           echo "✅ Signing configuration complete"
-      - name: Ensure Build Number Exists
+      - name: Increment Build Number
         script: |
-          PLIST_PATH="ios/App/App/Info.plist"
+          cd ios/App
           
-          # Initialize CFBundleVersion if missing
-          if ! /usr/libexec/PlistBuddy -c "Print CFBundleVersion" "$PLIST_PATH" &>/dev/null; then
-            echo "Adding missing CFBundleVersion"
-            /usr/libexec/PlistBuddy -c "Add CFBundleVersion string 1" "$PLIST_PATH"
-          fi
-          
-          # Set version to 4.2.2 explicitly
-          /usr/libexec/PlistBuddy -c "Set CFBundleShortVersionString 4.2.2" "$PLIST_PATH"
+          # Get current build number
+          PLIST_PATH="App/Info.plist"
+          CURRENT_BUILD=$(/usr/libexec/PlistBuddy -c "Print :CFBundleVersion" "$PLIST_PATH")
           
           # Increment build number
-          CURRENT_BUILD=$(/usr/libexec/PlistBuddy -c "Print CFBundleVersion" "$PLIST_PATH")
           NEW_BUILD=$((CURRENT_BUILD + 1))
-          /usr/libexec/PlistBuddy -c "Set CFBundleVersion $NEW_BUILD" "$PLIST_PATH"
+          /usr/libexec/PlistBuddy -c "Set :CFBundleVersion $NEW_BUILD" "$PLIST_PATH"
           
-          echo "Version set to: 4.2.2 (build $NEW_BUILD)"
+          echo "Updated build number from $CURRENT_BUILD to $NEW_BUILD"
+          
+          # Verify version info
+          echo "Version: $(/usr/libexec/PlistBuddy -c "Print :CFBundleShortVersionString" "$PLIST_PATH")"
+          echo "Build: $(/usr/libexec/PlistBuddy -c "Print :CFBundleVersion" "$PLIST_PATH")"
+      - name: Verify Version Numbers
+        script: |
+          cd ios/App
+          
+          # Get version info from built app
+          PLIST_PATH="build/App.xcarchive/Products/Applications/App.app/Info.plist"
+          echo "Final Version: $(/usr/libexec/PlistBuddy -c "Print :CFBundleShortVersionString" "$PLIST_PATH")"
+          echo "Final Build: $(/usr/libexec/PlistBuddy -c "Print :CFBundleVersion" "$PLIST_PATH")"
+          
+          # Verify build number > 1
+          BUILD_NUMBER=$(/usr/libexec/PlistBuddy -c "Print :CFBundleVersion" "$PLIST_PATH")
+          if [ "$BUILD_NUMBER" -le 1 ]; then
+            echo "❌ Build number must be greater than 1 for App Store Connect"
+            exit 1
+          fi
       - name: Validate Build Environment
         script: |
           echo "=== Xcode Version ==="
@@ -217,6 +215,9 @@ workflows:
           echo "=== Current Build Settings ==="
           cd ios/App
           xcodebuild -showBuildSettings | grep -i 'PROVISIONING_PROFILE\|BUNDLE_IDENTIFIER\|CODE_SIGN'
+      - name: Clean Derived Data
+        script: |
+          rm -rf ~/Library/Developer/Xcode/DerivedData/*
       - name: Build and Archive
         script: |
           set -ex
@@ -294,27 +295,27 @@ workflows:
           echo "=== Verifying Signature ==="
           codesign -vvv --deep --strict "$APP_PATH"
           echo "✅ Build successfully signed and validated"
-      # - name: Verify Build Artifacts
-      #   script: |
-      #     echo "=== Verifying Build Output ==="
+      - name: Verify Build Artifacts
+        script: |
+          echo "=== Verifying Build Output ==="
           
-      #     # Check for xcarchive
-      #     if [ ! -d "ios/App/build/App.xcarchive" ]; then
-      #       echo "❌ Missing App.xcarchive"
-      #       exit 1
-      #     fi
+          # Check for xcarchive
+          if [ ! -d "ios/App/build/App.xcarchive" ]; then
+            echo "❌ Missing App.xcarchive"
+            exit 1
+          fi
           
-      #     # Check for IPA if expected
-      #     if [ ! -f "ios/App/build/ipa/App.ipa" ]; then
-      #       echo "❌ Missing App.ipa"
-      #       exit 1
-      #     fi
+          # Check for IPA if expected
+          if [ ! -f "ios/App/build/ipa/App.ipa" ]; then
+            echo "❌ Missing App.ipa"
+            exit 1
+          fi
           
-      #     # Verify archive contents
-      #     echo "Archive Contents:"
-      #     ls -la "ios/App/build/App.xcarchive/Products/Applications/App.app"
+          # Verify archive contents
+          echo "Archive Contents:"
+          ls -la "ios/App/build/App.xcarchive/Products/Applications/App.app"
           
-      #     echo "✅ Build artifacts verified"
+          echo "✅ Build artifacts verified"
 
       - name: Verify Configuration
         script: |
