@@ -418,6 +418,17 @@ workflows:
           fi
           
           echo "✅ All critical files present and valid"
+      - name: Upload to TestFlight
+        script: |
+          # Install required tools
+          npm install -g @appstoreconnect/cli
+          
+          # Upload using appstoreconnect CLI
+          appstoreconnect upload \
+            --ipa ios/App/build/ipa/App.ipa \
+            --api-key "$APP_STORE_CONNECT_PRIVATE_KEY" \
+            --key-id "$APP_STORE_CONNECT_KEY_ID" \
+            --issuer-id "$APP_STORE_CONNECT_ISSUER_ID"
     artifacts:
       - ios/App/build/ipa/App.ipa
       - ios/App/xcodebuild.log
