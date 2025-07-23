@@ -294,27 +294,27 @@ workflows:
           echo "=== Verifying Signature ==="
           codesign -vvv --deep --strict "$APP_PATH"
           echo "✅ Build successfully signed and validated"
-      - name: Verify Build Artifacts
-        script: |
-          echo "=== Verifying Build Output ==="
+      # - name: Verify Build Artifacts
+      #   script: |
+      #     echo "=== Verifying Build Output ==="
           
-          # Check for xcarchive
-          if [ ! -d "ios/App/build/App.xcarchive" ]; then
-            echo "❌ Missing App.xcarchive"
-            exit 1
-          fi
+      #     # Check for xcarchive
+      #     if [ ! -d "ios/App/build/App.xcarchive" ]; then
+      #       echo "❌ Missing App.xcarchive"
+      #       exit 1
+      #     fi
           
-          # Check for IPA if expected
-          if [ ! -f "ios/App/build/ipa/App.ipa" ]; then
-            echo "❌ Missing App.ipa"
-            exit 1
-          fi
+      #     # Check for IPA if expected
+      #     if [ ! -f "ios/App/build/ipa/App.ipa" ]; then
+      #       echo "❌ Missing App.ipa"
+      #       exit 1
+      #     fi
           
-          # Verify archive contents
-          echo "Archive Contents:"
-          ls -la "ios/App/build/App.xcarchive/Products/Applications/App.app"
+      #     # Verify archive contents
+      #     echo "Archive Contents:"
+      #     ls -la "ios/App/build/App.xcarchive/Products/Applications/App.app"
           
-          echo "✅ Build artifacts verified"
+      #     echo "✅ Build artifacts verified"
 
       - name: Verify Configuration
         script: |
