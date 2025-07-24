@@ -406,11 +406,40 @@ workflows:
         script: |
           ls -la ios/App/build/ipa/App.ipa || exit 1
 
-      - name: Validate Code Signing
+      - name: Validate Code Signing (Fixed)
         script: |
+          # Extract and check provisioning profile
+          unzip -p ios/App/build/ipa/App.ipa Payload/App.app/embedded.mobileprovision > provision.plist || {
+            echo "❌ Failed to extract embedded.mobileprovision";
+            exit 1;
+          }
+          
+          # Check profile contents
+          echo "=== Provisioning Profile Contents ==="
+          security cms -D -i provision.plist | grep -A1 -E 'ApplicationIdentifierPrefix|TeamIdentifier|Name' || {
+            echo "❌ No valid TeamIdentifier found";
+            exit 1;
+          }
+          
+          # Verify code signing
+          echo "=== Code Signing Details ==="
+          codesign -dv --verbose=4 ios/App/build/ipa/App.ipa 2>&1 | grep -E 'Authority|TeamIdentifier|Signed' || {
+            echo "❌ Invalid code signing";
+            exit 1;
+          }
+          
+          echo "✅ Signing validation passed"
+      - name: Debug Build Artifacts
+        script: |
+          echo "=== IPA Contents ==="
+          unzip -l ios/App/build/ipa/App.ipa | head -20
+          
+          echo "=== Mobile Provision Info ==="
           unzip -p ios/App/build/ipa/App.ipa Payload/App.app/embedded.mobileprovision > provision.plist
-          security cms -D -i provision.plist | grep -A1 -E 'ApplicationIdentifierPrefix|TeamIdentifier'
-          codesign -dv --verbose=4 ios/App/build/ipa/App.ipa 2>&1 | grep -E 'Authority|TeamIdentifier'
+          plutil -p provision.plist | grep -E 'application-identifier|com.apple.developer.team-identifier'
+          
+          echo "=== Bundle Identifier ==="
+          unzip -p ios/App/build/ipa/App.ipa Payload/App.app/Info.plist | plutil -extract CFBundleIdentifier xml1 -o - -
     artifacts:
       - ios/App/build/ipa/App.ipa
       - ios/App/xcodebuild.log
