@@ -23,10 +23,12 @@ workflows:
         - push
     scripts:
       # PHASE 1: CLEAN AND SETUP
-      - name: Clean Workspace
+      - name: Clean Workspace and Derived Data
         script: |
           echo "=== Cleaning Workspace ==="
           rm -rf node_modules ios/Pods ios/App/Pods
+          rm -rf ~/Library/Developer/Xcode/DerivedData/*
+          rm -rf ios/Pods ios/Podfile.lock
           npm cache clean --force
 
       # PHASE 2: DEPENDENCY INSTALLATION
@@ -201,6 +203,11 @@ workflows:
             echo "❌ Build number must be greater than 1 for App Store Connect"
             exit 1
           fi
+  
+      - name: Validate IPA Structure
+        script: |
+          unzip -l ios/App/build/ipa/App.ipa | grep -e "Payload/.*\.app/Info.plist" -e "Assets.car" -e "embedded.mobileprovision"
+          # Should show all critical files
       - name: Validate Build Environment
         script: |
           echo "=== Xcode Version ==="
@@ -215,9 +222,6 @@ workflows:
           echo "=== Current Build Settings ==="
           cd ios/App
           xcodebuild -showBuildSettings | grep -i 'PROVISIONING_PROFILE\|BUNDLE_IDENTIFIER\|CODE_SIGN'
-      - name: Clean Derived Data
-        script: |
-          rm -rf ~/Library/Developer/Xcode/DerivedData/*
       - name: Build and Archive
         script: |
           set -ex
@@ -397,6 +401,17 @@ workflows:
           fi
           
           echo "✅ All critical files present and valid"
+      - name: Validate Code Signing
+        script: |
+          unzip -j ios/App/build/ipa/App.ipa "Payload/App.app" -d /tmp
+          codesign -dv --verbose=4 /tmp/App.app
+          rm -rf /tmp/App.app
+      - name: Validate IPA with altool
+        script: |
+          xcrun altool --validate-app -f ios/App/build/ipa/App.ipa \
+            --apiKey "$APP_STORE_CONNECT_API_KEY" \
+            --apiIssuer "$APP_STORE_CONNECT_ISSUER_ID" \
+            --verbose
     artifacts:
       - ios/App/build/ipa/App.ipa
       - ios/App/xcodebuild.log
