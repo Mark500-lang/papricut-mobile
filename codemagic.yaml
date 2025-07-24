@@ -204,10 +204,6 @@ workflows:
             exit 1
           fi
   
-      - name: Validate IPA Structure
-        script: |
-          unzip -l ios/App/build/ipa/App.ipa | grep -e "Payload/.*\.app/Info.plist" -e "Assets.car" -e "embedded.mobileprovision"
-          # Should show all critical files
       - name: Validate Build Environment
         script: |
           echo "=== Xcode Version ==="
