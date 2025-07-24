@@ -406,29 +406,33 @@ workflows:
         script: |
           ls -la ios/App/build/ipa/App.ipa || exit 1
 
-      - name: Validate Code Signing (Fixed)
+      - name: Re-sign IPA Properly
         script: |
-          # Extract and check provisioning profile
-          unzip -p ios/App/build/ipa/App.ipa Payload/App.app/embedded.mobileprovision > provision.plist || {
-            echo "❌ Failed to extract embedded.mobileprovision";
-            exit 1;
-          }
+          # 1. Extract IPA
+          unzip -q ios/App/build/ipa/App.ipa -d /tmp/resign
           
-          # Check profile contents
-          echo "=== Provisioning Profile Contents ==="
-          security cms -D -i provision.plist | grep -A1 -E 'ApplicationIdentifierPrefix|TeamIdentifier|Name' || {
-            echo "❌ No valid TeamIdentifier found";
-            exit 1;
-          }
+          # 2. Remove existing signature
+          rm -rf /tmp/resign/Payload/App.app/_CodeSignature
+          rm -f /tmp/resign/Payload/App.app/embedded.mobileprovision
           
-          # Verify code signing
-          echo "=== Code Signing Details ==="
-          codesign -dv --verbose=4 ios/App/build/ipa/App.ipa 2>&1 | grep -E 'Authority|TeamIdentifier|Signed' || {
-            echo "❌ Invalid code signing";
-            exit 1;
-          }
+          # 3. Embed the correct profile
+          echo "$PROVISIONING_PROFILE" | base64 --decode > /tmp/resign/Payload/App.app/embedded.mobileprovision
           
-          echo "✅ Signing validation passed"
+          # 4. Re-sign with force
+          codesign -f -s "Apple Distribution" \
+            --entitlements <(security cms -D -i /tmp/resign/Payload/App.app/embedded.mobileprovision | grep -A1 Entitlements | tail -1) \
+            /tmp/resign/Payload/App.app
+          
+          # 5. Repackage
+          cd /tmp/resign
+          zip -qr ../App-resigned.ipa Payload/
+          mv ../App-resigned.ipa $CM_BUILD_DIR/ios/App/build/ipa/App.ipa
+      - name: Verify Resigned IPA
+        script: |
+          codesign -dv --verbose=4 ios/App/build/ipa/App.ipa 2>&1 | grep -E 'Authority|TeamIdentifier|Signed'
+          # Should show:
+          # Authority=Apple Distribution: Your Name (TeamID)
+          # TeamIdentifier=YourTeamID
       - name: Debug Build Artifacts
         script: |
           echo "=== IPA Contents ==="
