@@ -10,7 +10,8 @@ workflows:
         NODE_VERSION: "18.x"
         COCOAPODS_VERSION: "1.15.2"
         DEVELOPMENT_TEAM: "H9A4H444G4"
-        PROFILE_UUID: "515def82-56ac-478e-b89c-e0023f684b14"   
+        PROFILE_UUID: "ab5711c0-e82b-43d7-8c83-557e1c5a3c1b"  
+        BUNDLE_ID: papricut.app.mobile 
       groups:
         - Papricut
     cache:
