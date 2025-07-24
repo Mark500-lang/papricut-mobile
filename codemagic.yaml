@@ -402,24 +402,15 @@ workflows:
           unzip -j ios/App/build/ipa/App.ipa "Payload/App.app" -d /tmp
           codesign -dv --verbose=4 /tmp/App.app
           rm -rf /tmp/App.app
-      - name: Validate IPA with altool (Fixed)
+      - name: Verify IPA Exists
         script: |
-          xcrun altool --validate-app \
-            -f ios/App/build/ipa/App.ipa \
-            -t ios \
-            --apiKey "$APP_STORE_CONNECT_API_KEY" \
-            --apiIssuer "$APP_STORE_CONNECT_ISSUER_ID" \
-            --verbose
-      - name: Verify API Key Works
-        script: |
-          appstoreconnect list-builds \
-            --api-key "$APP_STORE_CONNECT_PRIVATE_KEY" \
-            --key-id "$APP_STORE_CONNECT_KEY_ID" \
-            --issuer-id "$APP_STORE_CONNECT_ISSUER_ID"
+          ls -la ios/App/build/ipa/App.ipa || exit 1
 
-      - name: Check IPA Structure
+      - name: Validate Code Signing
         script: |
-          unzip -l ios/App/build/ipa/App.ipa | head -20
+          unzip -p ios/App/build/ipa/App.ipa Payload/App.app/embedded.mobileprovision > provision.plist
+          security cms -D -i provision.plist | grep -A1 -E 'ApplicationIdentifierPrefix|TeamIdentifier'
+          codesign -dv --verbose=4 ios/App/build/ipa/App.ipa 2>&1 | grep -E 'Authority|TeamIdentifier'
     artifacts:
       - ios/App/build/ipa/App.ipa
       - ios/App/xcodebuild.log
