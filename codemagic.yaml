@@ -402,12 +402,24 @@ workflows:
           unzip -j ios/App/build/ipa/App.ipa "Payload/App.app" -d /tmp
           codesign -dv --verbose=4 /tmp/App.app
           rm -rf /tmp/App.app
-      - name: Validate IPA with altool
+      - name: Validate IPA with altool (Fixed)
         script: |
-          xcrun altool --validate-app -f ios/App/build/ipa/App.ipa \
+          xcrun altool --validate-app \
+            -f ios/App/build/ipa/App.ipa \
+            -t ios \
             --apiKey "$APP_STORE_CONNECT_API_KEY" \
             --apiIssuer "$APP_STORE_CONNECT_ISSUER_ID" \
             --verbose
+      - name: Verify API Key Works
+        script: |
+          appstoreconnect list-builds \
+            --api-key "$APP_STORE_CONNECT_PRIVATE_KEY" \
+            --key-id "$APP_STORE_CONNECT_KEY_ID" \
+            --issuer-id "$APP_STORE_CONNECT_ISSUER_ID"
+
+      - name: Check IPA Structure
+        script: |
+          unzip -l ios/App/build/ipa/App.ipa | head -20
     artifacts:
       - ios/App/build/ipa/App.ipa
       - ios/App/xcodebuild.log
