@@ -188,6 +188,13 @@ workflows:
           # Verify version info
           echo "Version: $(/usr/libexec/PlistBuddy -c "Print :CFBundleShortVersionString" "$PLIST_PATH")"
           echo "Build: $(/usr/libexec/PlistBuddy -c "Print :CFBundleVersion" "$PLIST_PATH")"
+      - name: Verify Info.plist
+        script: |
+          plutil -lint ios/App/App/Info.plist || exit 1
+          grep -A1 "NSPhotoLibraryUsageDescription" ios/App/App/Info.plist || {
+            echo "❌ Missing required privacy descriptions";
+            exit 1;
+          }
       - name: Verify Version Numbers
         script: |
           cd ios/App
@@ -406,7 +413,13 @@ workflows:
         script: |
           ls -la ios/App/build/ipa/App.ipa || exit 1
 
-      - name: Re-sign IPA (Fixed Entitlements)
+      - name: Re-sign I- name: Verify Info.plist
+  script: |
+    plutil -lint ios/App/App/Info.plist || exit 1
+    grep -A1 "NSPhotoLibraryUsageDescription" ios/App/App/Info.plist || {
+      echo "❌ Missing required privacy descriptions";
+      exit 1;
+    }PA (Fixed Entitlements)
         script: |
           # 1. Extract IPA to clean directory
           WORKDIR="/tmp/resign_$(date +%s)"
