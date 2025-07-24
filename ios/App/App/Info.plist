@@ -18,9 +18,9 @@
     <key>CFBundlePackageType</key>
     <string>APPL</string>
     <key>CFBundleShortVersionString</key>
-    <string>4.6</string>  <!-- Updated from 4.4 -->
+    <string>4.5</string> 
     <key>CFBundleVersion</key>
-    <string>$(CURRENT_PROJECT_VERSION)</string>  <!-- Better than hardcoded -->
+    <string>3</string> 
 
     <!-- Privacy Descriptions (CRITICAL FIX) -->
     <key>NSPhotoLibraryUsageDescription</key>
