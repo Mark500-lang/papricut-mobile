@@ -406,33 +406,61 @@ workflows:
         script: |
           ls -la ios/App/build/ipa/App.ipa || exit 1
 
-      - name: Re-sign IPA Properly
+      - name: Re-sign IPA (Fixed Entitlements)
         script: |
-          # 1. Extract IPA
-          unzip -q ios/App/build/ipa/App.ipa -d /tmp/resign
+          # 1. Extract IPA to clean directory
+          WORKDIR="/tmp/resign_$(date +%s)"
+          mkdir -p "$WORKDIR"
+          unzip -q ios/App/build/ipa/App.ipa -d "$WORKDIR"
           
-          # 2. Remove existing signature
-          rm -rf /tmp/resign/Payload/App.app/_CodeSignature
-          rm -f /tmp/resign/Payload/App.app/embedded.mobileprovision
+          # 2. Prepare provisioning profile
+          echo "$PROVISIONING_PROFILE" | base64 --decode > "$WORKDIR/profile.mobileprovision"
+          PROVISIONING_UUID=$(/usr/libexec/PlistBuddy -c 'Print UUID' /dev/stdin <<< $(security cms -D -i "$WORKDIR/profile.mobileprovision"))
+          cp "$WORKDIR/profile.mobileprovision" "$WORKDIR/Payload/App.app/embedded.mobileprovision"
           
-          # 3. Embed the correct profile
-          echo "$PROVISIONING_PROFILE" | base64 --decode > /tmp/resign/Payload/App.app/embedded.mobileprovision
+          # 3. Extract entitlements properly
+          security cms -D -i "$WORKDIR/profile.mobileprovision" > "$WORKDIR/profile.plist"
+          /usr/libexec/PlistBuddy -x -c 'Print Entitlements' "$WORKDIR/profile.plist" > "$WORKDIR/entitlements.plist" || {
+            echo "❌ Failed to extract entitlements. Profile contents:"
+            plutil -p "$WORKDIR/profile.plist"
+            exit 1
+          }
           
-          # 4. Re-sign with force
-          codesign -f -s "Apple Distribution" \
-            --entitlements <(security cms -D -i /tmp/resign/Payload/App.app/embedded.mobileprovision | grep -A1 Entitlements | tail -1) \
-            /tmp/resign/Payload/App.app
+          # 4. Force re-sign with explicit entitlements
+          codesign -f --deep -s "Apple Distribution" \
+            --entitlements "$WORKDIR/entitlements.plist" \
+            --timestamp \
+            "$WORKDIR/Payload/App.app"
           
-          # 5. Repackage
-          cd /tmp/resign
+          # 5. Verify signing
+          codesign -dv --verbose=4 "$WORKDIR/Payload/App.app" 2>&1 | grep -E 'Authority|TeamIdentifier|Signed' || {
+            echo "❌ Re-signing failed. Full codesign output:"
+            codesign -dv --verbose=4 "$WORKDIR/Payload/App.app"
+            exit 1
+          }
+          
+          # 6. Repackage
+          cd "$WORKDIR"
           zip -qr ../App-resigned.ipa Payload/
-          mv ../App-resigned.ipa $CM_BUILD_DIR/ios/App/build/ipa/App.ipa
-      - name: Verify Resigned IPA
+          mv ../App-resigned.ipa "$CM_BUILD_DIR/ios/App/build/ipa/App.ipa"
+          rm -rf "$WORKDIR"
+      - name: Verify Final IPA
         script: |
-          codesign -dv --verbose=4 ios/App/build/ipa/App.ipa 2>&1 | grep -E 'Authority|TeamIdentifier|Signed'
-          # Should show:
-          # Authority=Apple Distribution: Your Name (TeamID)
-          # TeamIdentifier=YourTeamID
+          # 1. Check file structure
+          unzip -l ios/App/build/ipa/App.ipa | grep -e "Payload/.*\.app/Info.plist" -e "embedded.mobileprovision" || {
+            echo "❌ IPA structure invalid";
+            exit 1;
+          }
+          
+          # 2. Verify code signing
+          TEMP_DIR=$(mktemp -d)
+          unzip -q ios/App/build/ipa/App.ipa -d "$TEMP_DIR"
+          codesign -dv --verbose=4 "$TEMP_DIR/Payload/App.app" 2>&1 | grep -E 'Authority=Apple Distribution|TeamIdentifier=' || {
+            echo "❌ Final IPA signing verification failed";
+            exit 1;
+          }
+          rm -rf "$TEMP_DIR"
+          echo "✅ IPA is properly signed"
       - name: Debug Build Artifacts
         script: |
           echo "=== IPA Contents ==="
