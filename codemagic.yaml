@@ -109,66 +109,32 @@ workflows:
             exit 1
           fi
 
-      - name: Configure Signing
+      - name: Configure Signing (Fixed)
         script: |
           set -ex
           echo "=== Setting Up Signing ==="
           cd ios/App
           
-          # Import certificates
-          echo "$DISTRIBUTION_CERTIFICATE" | base64 --decode > signing.p12
-          echo "$PROVISIONING_PROFILE" | base64 --decode > profile.mobileprovision
-          
-          # Extract provisioning profile UUID
-          PROFILE_UUID=$(grep -a -A1 UUID profile.mobileprovision | grep -io "[-A-F0-9]\{36\}")
-          [ -n "$PROFILE_UUID" ] || { echo "❌ Failed to extract profile UUID"; exit 1; }
-          
-          # Set up keychain
-          security create-keychain -p "" build.keychain
-          security import signing.p12 -k build.keychain -P "$CERTIFICATE_PASSWORD" -T /usr/bin/codesign
-          security list-keychains -s build.keychain
-          security default-keychain -s build.keychain
-          security unlock-keychain -p "" build.keychain
-          security set-key-partition-list -S apple-tool:,apple: -k "" build.keychain
-          
-          # Install provisioning profile
+          # Decode and install provisioning profile
           mkdir -p ~/Library/MobileDevice/Provisioning\ Profiles
-          cp profile.mobileprovision ~/Library/MobileDevice/Provisioning\ Profiles/"$PROFILE_UUID".mobileprovision
+          echo "$PROVISIONING_PROFILE" | base64 --decode > ~/Library/MobileDevice/Provisioning\ Profiles/profile.mobileprovision
           
-          # Create pod signing override file in project root
-          echo "=== Configuring Pod Signing ==="
-          cat <<EOT > disable-pod-signing.xcconfig
-          CODE_SIGNING_ALLOWED = NO
-          CODE_SIGNING_REQUIRED = NO
-          PROVISIONING_PROFILE_SPECIFIER = ""
-          DEVELOPMENT_TEAM = ""
-          EOT
+          # Extract NEW UUID from the installed profile
+          PROFILE_UUID=$(/usr/libexec/PlistBuddy -c 'Print :UUID' /dev/stdin <<< $(security cms -D -i ~/Library/MobileDevice/Provisioning\ Profiles/profile.mobileprovision))
+          echo "ACTUAL_PROFILE_UUID=$PROFILE_UUID" >> $CM_ENV
           
-          # Update Pods xcconfig files with absolute path
-          PODS_ROOT_ABS=$(pwd)/Pods
-          find "Pods/Target Support Files" -name "*.*cconfig" | while read file; do
-            echo "#include \"$(pwd)/disable-pod-signing.xcconfig\"" >> "$file"
-          done
+          # Verify installation
+          if [ -f ~/Library/MobileDevice/Provisioning\ Profiles/profile.mobileprovision ]; then
+            echo "✅ Provisioning profile installed at:"
+            ls -la ~/Library/MobileDevice/Provisioning\ Profiles/
+          else
+            echo "❌ Failed to install provisioning profile"
+            exit 1
+          fi
           
-          # Fully convert to manual signing
-          echo "=== Updating Project Settings ==="
-          PBXPROJ="App.xcodeproj/project.pbxproj"
-          cp "$PBXPROJ" "$PBXPROJ.bak"
-          
-          # Remove any automatic signing settings
-          sed -i '' '/PROVISIONING_PROFILE_SPECIFIER/d' "$PBXPROJ"
-          sed -i '' '/CODE_SIGN_STYLE/d' "$PBXPROJ"
-          sed -i '' '/DEVELOPMENT_TEAM/d' "$PBXPROJ"
-          
-          # Add manual signing settings
-          sed -i '' "/buildSettings = {/a \\
-              CODE_SIGN_STYLE = Manual; \\
-              PROVISIONING_PROFILE_SPECIFIER = \"$PROFILE_UUID\"; \\
-              DEVELOPMENT_TEAM = H9A4H444G4; \\
-              CODE_SIGN_IDENTITY = \"Apple Distribution\"; \\
-              " "$PBXPROJ"
-          
-          echo "✅ Signing configuration complete"
+          # Update build settings with ACTUAL UUID
+          /usr/libexec/PlistBuddy -c "Set :objects:********:buildSettings:PROVISIONING_PROFILE_SPECIFIER $PROFILE_UUID" App.xcodeproj/project.pbxproj
+          /usr/libexec/PlistBuddy -c "Set :objects:********:buildSettings:DEVELOPMENT_TEAM $DEVELOPMENT_TEAM" App.xcodeproj/project.pbxproj
       - name: Increment Build Number
         script: |
           cd ios/App
